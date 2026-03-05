@@ -699,3 +699,49 @@ func (r *AgentRepo) Upsert(_ context.Context, a *domain.Agent) error {
 	r.data[a.TenantID] = &cp
 	return nil
 }
+
+// ─── TenantAgentRepo ─────────────────────────────────────────────────────────
+
+type TenantAgentRepo struct {
+	mu   sync.RWMutex
+	data map[string]*domain.TenantAgent // keyed by tenantID
+}
+
+func NewTenantAgentRepo() *TenantAgentRepo {
+	return &TenantAgentRepo{data: make(map[string]*domain.TenantAgent)}
+}
+
+func (r *TenantAgentRepo) FindByTenant(_ context.Context, tenantID string) (*domain.TenantAgent, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	a, ok := r.data[tenantID]
+	if !ok {
+		return nil, fmt.Errorf("agent not configured for tenant %q", tenantID)
+	}
+	cp := *a
+	return &cp, nil
+}
+
+func (r *TenantAgentRepo) Upsert(_ context.Context, a *domain.TenantAgent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a.ID == "" {
+		a.ID = newID()
+	}
+	t := now()
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = t
+	}
+	a.UpdatedAt = t
+	cp := *a
+	r.data[a.TenantID] = &cp
+	return nil
+}
+
+func (r *TenantAgentRepo) Delete(_ context.Context, tenantID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.data, tenantID)
+	return nil
+}
+

@@ -2,8 +2,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -112,16 +116,73 @@ func (s *TenantService) Update(ctx context.Context, id string, req CreateTenantR
 func (s *TenantService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
+// ─── TenantAgentService ────────────────────────────────────────────────────────────────
 
+type TenantAgentService struct {
+	repo domain.TenantAgentRepository
+}
+
+func NewTenantAgentService(repo domain.TenantAgentRepository) *TenantAgentService {
+	return &TenantAgentService{repo: repo}
+}
+
+func (s *TenantAgentService) Get(ctx context.Context, tenantID string) (*domain.TenantAgent, error) {
+	return s.repo.FindByTenant(ctx, tenantID)
+}
+
+// SaveTenantAgentRequest is the body for creating or updating a tenant agent.
+type SaveTenantAgentRequest struct {
+	Name        string `json:"name"`
+	EndpointURL string `json:"endpointUrl"`
+	SecretKey   string `json:"secretKey"`
+	IsActive    bool   `json:"isActive"`
+}
+
+func (s *TenantAgentService) Save(ctx context.Context, tenantID string, req SaveTenantAgentRequest) (*domain.TenantAgent, error) {
+	existing, _ := s.repo.FindByTenant(ctx, tenantID)
+	t := time.Now().UTC()
+	a := &domain.TenantAgent{
+		TenantID:    tenantID,
+		Name:        req.Name,
+		EndpointURL: req.EndpointURL,
+		SecretKey:   req.SecretKey,
+		IsActive:    req.IsActive,
+		UpdatedAt:   t,
+	}
+	if req.Name == "" {
+		a.Name = "LOGO ERP Agent"
+	}
+	if existing != nil {
+		a.ID = existing.ID
+		a.CreatedAt = existing.CreatedAt
+	} else {
+		a.ID = uuid.New().String()
+		a.CreatedAt = t
+	}
+	if err := s.repo.Upsert(ctx, a); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+func (s *TenantAgentService) Delete(ctx context.Context, tenantID string) error {
+	return s.repo.Delete(ctx, tenantID)
+}
+
+// GenerateSecret produces a new random secret key.
+func (s *TenantAgentService) GenerateSecret() string {
+	return "agt-" + uuid.New().String()
+}
 // ─── WorkflowService ──────────────────────────────────────────────────────────
 
 type WorkflowService struct {
-	workflows domain.WorkflowRepository
-	runs      domain.WorkflowRunRepository
+	workflows  domain.WorkflowRepository
+	runs       domain.WorkflowRunRepository
+	agentRepo  domain.TenantAgentRepository
 }
 
-func NewWorkflowService(workflows domain.WorkflowRepository, runs domain.WorkflowRunRepository) *WorkflowService {
-	return &WorkflowService{workflows: workflows, runs: runs}
+func NewWorkflowService(workflows domain.WorkflowRepository, runs domain.WorkflowRunRepository, agentRepo domain.TenantAgentRepository) *WorkflowService {
+	return &WorkflowService{workflows: workflows, runs: runs, agentRepo: agentRepo}
 }
 
 func (s *WorkflowService) List(ctx context.Context, tenantID string) ([]domain.Workflow, error) {
@@ -239,11 +300,103 @@ type TriggerResult struct {
 	AgentModel map[string]interface{} `json:"agentModel"`
 }
 
+// applyFieldMappings reads a transform_mapping node's config and remaps the
+// incoming payload keys to the target model field names.
+// Config shape: { "mappingRules": [{"source": "cariKodu", "target": "CLIENTCODE", "transform": "NONE"}, ...] }
+func applyFieldMappings(node domain.WorkflowNode, payload map[string]interface{}) map[string]interface{} {
+	rules, ok := node.Config["mappingRules"]
+	if !ok {
+		return payload
+	}
+	// mappingRules arrives as []interface{} from JSON deserialization
+	ruleList, ok := rules.([]interface{})
+	if !ok || len(ruleList) == 0 {
+		return payload
+	}
+	mapped := make(map[string]interface{}, len(payload))
+	// Copy all original fields first (unmapped fields pass through)
+	for k, v := range payload {
+		mapped[k] = v
+	}
+	for _, r := range ruleList {
+		rMap, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		source, _ := rMap["source"].(string)
+		target, _ := rMap["target"].(string)
+		transform, _ := rMap["transform"].(string)
+		if source == "" || target == "" {
+			continue
+		}
+		val, exists := payload[source]
+		if !exists {
+			continue
+		}
+		// Apply simple string transforms
+		if strVal, isStr := val.(string); isStr {
+			switch transform {
+			case "UPPERCASE":
+				val = strings.ToUpper(strVal)
+			case "LOWERCASE":
+				val = strings.ToLower(strVal)
+			case "TRIM":
+				val = strings.TrimSpace(strVal)
+			}
+		}
+		mapped[target] = val
+		// Remove the original key if it differs from the target
+		if source != target {
+			delete(mapped, source)
+		}
+	}
+	return mapped
+}
+
+// callAgent attempts an HTTP POST to the agent endpoint.
+// Sends X-Agent-Secret header if a secret is provided.
+// Returns the agent's response body parsed as a map, or an error map on failure.
+func callAgent(ctx context.Context, endpoint, secret string, agentModel map[string]interface{}) map[string]interface{} {
+	if endpoint == "" {
+		return map[string]interface{}{"_agentError": "no endpoint configured"}
+	}
+	body, err := json.Marshal(agentModel)
+	if err != nil {
+		return map[string]interface{}{"_agentError": "marshal error: " + err.Error()}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return map[string]interface{}{"_agentError": "bad endpoint URL: " + err.Error(), "_agentEndpoint": endpoint}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secret != "" {
+		req.Header.Set("X-Agent-Secret", secret)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return map[string]interface{}{"_agentError": err.Error(), "_agentEndpoint": endpoint}
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode >= 400 {
+		return map[string]interface{}{"_agentError": fmt.Sprintf("HTTP %d", resp.StatusCode), "_agentEndpoint": endpoint}
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		// Non-JSON response (e.g. plain string) — treat as success
+		return map[string]interface{}{"_agentCalled": true, "_agentEndpoint": endpoint, "_agentStatusCode": resp.StatusCode}
+	}
+	result["_agentEndpoint"] = endpoint
+	result["_agentStatusCode"] = resp.StatusCode
+	return result
+}
+
 // Trigger executes the full trigger logic for a workflow:
 //  1. Fetch the workflow and its nodes
-//  2. Scan nodes: if any node has type "custom_cari_check" → cariKontrolEdilecekMi = true
-//  3. Build the agent model that would be forwarded to the on-premise Agent
-//  4. Record the run with the built model as result payload
+//  2. Apply field mappings from any "transform_mapping" node
+//  3. Scan nodes: if "custom_cari_check" or "custom_cari_kontrol" present → cariKontrolEdilecekMi = true
+//  4. Build the agent model and attempt to call the configured agent endpoint
+//  5. Record the run
 func (s *WorkflowService) Trigger(
 	ctx context.Context,
 	workflowID, tenantID string,
@@ -253,27 +406,74 @@ func (s *WorkflowService) Trigger(
 	if err != nil {
 		return nil, err
 	}
+	if wf.Status == domain.WorkflowStatusDisabled {
+		return nil, fmt.Errorf("workflow is disabled")
+	}
 
-	// Scan node list: presence of "custom_cari_check" type drives the flag.
-	cariKontrolEdilecekMi := false
+	// Step 1: Apply field mappings from transform_mapping nodes.
+	mappedPayload := make(map[string]interface{}, len(userPayload))
+	for k, v := range userPayload {
+		mappedPayload[k] = v
+	}
 	for _, node := range wf.Nodes {
-		if node.Type == "custom_cari_check" {
-			cariKontrolEdilecekMi = true
-			break
+		if node.Type == "transform_mapping" {
+			mappedPayload = applyFieldMappings(node, mappedPayload)
 		}
 	}
 
-	// Build the model that will be sent to the local Agent.
-	agentModel := make(map[string]interface{}, len(userPayload)+1)
-	for k, v := range userPayload {
+	// Step 2: Look up the tenant agent configuration (endpoint + secret).
+	var agentEndpoint, agentSecret string
+	if ta, err := s.agentRepo.FindByTenant(ctx, tenantID); err == nil && ta.IsActive {
+		agentEndpoint = ta.EndpointURL
+		agentSecret = ta.SecretKey
+	}
+
+	// Step 3: Scan nodes — collect feature flags and append trigger path to agent base URL.
+	cariKontrolEdilecekMi := false
+	for _, node := range wf.Nodes {
+		switch node.Type {
+		case "custom_cari_check", "custom_cari_kontrol":
+			cariKontrolEdilecekMi = true
+		case "trigger_http_json":
+			// Append the workflow-specific path to the tenant's agent base URL.
+			if agentEndpoint != "" {
+				if path, ok := node.Config["endpoint"].(string); ok && path != "" {
+					base := strings.TrimRight(agentEndpoint, "/")
+					p := "/" + strings.TrimLeft(path, "/")
+					agentEndpoint = base + p
+				}
+			}
+		case "agent_request":
+			// Fallback: if no tenant agent is configured, use the node's endpoint.
+			if agentEndpoint == "" {
+				if ep, ok := node.Config["agentEndpoint"].(string); ok && ep != "" {
+					agentEndpoint = ep
+				}
+			}
+		}
+	}
+
+	// Step 4: Build the model that will be sent to the local Agent.
+	agentModel := make(map[string]interface{}, len(mappedPayload)+3)
+	for k, v := range mappedPayload {
 		agentModel[k] = v
 	}
 	agentModel["cariKontrolEdilecekMi"] = cariKontrolEdilecekMi
 	agentModel["workflowId"] = workflowID
 	agentModel["triggeredAt"] = time.Now().UTC()
 
-	// Record the run (simulated success for now).
-	t := time.Now().UTC()
+	// Step 5: Attempt actual agent call; result always contains diagnostic fields.
+	agentResponse := callAgent(ctx, agentEndpoint, agentSecret, agentModel)
+	resultPayload := agentModel
+	for k, v := range agentResponse {
+		resultPayload[k] = v
+	}
+	if _, hasErr := agentResponse["_agentError"]; !hasErr {
+		resultPayload["_agentCalled"] = true
+	}
+
+	// Step 6: Record the run.
+	now := time.Now().UTC()
 	run := &domain.WorkflowRun{
 		ID:         uuid.New().String(),
 		WorkflowID: workflowID,
@@ -281,9 +481,9 @@ func (s *WorkflowService) Trigger(
 		Status:     domain.RunStatusSuccess,
 		DurationMs: 0,
 		Payload:    userPayload,
-		Result:     agentModel,
-		StartedAt:  t,
-		FinishedAt: &t,
+		Result:     resultPayload,
+		StartedAt:  now,
+		FinishedAt: &now,
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return nil, err

@@ -44,6 +44,8 @@ services:
       CORS_ORIGIN:  ${CORS_ORIGIN:-http://localhost:5173}
       API_KEY_ARCELIK: ${API_KEY_ARCELIK:-test-api-key-arcelik-001}
       API_KEY_BEKO:    ${API_KEY_BEKO:-test-api-key-beko-002}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

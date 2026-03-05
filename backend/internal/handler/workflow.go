@@ -144,3 +144,39 @@ func (h *WorkflowHandler) Trigger(w http.ResponseWriter, r *http.Request) {
 		"agentModel": result.AgentModel,
 	})
 }
+
+// POST /api/v1/webhooks/{workflowId}
+// Public webhook endpoint for external systems – authenticated via X-API-Key header.
+// Triggers the given workflow with the provided JSON payload.
+// Field mappings defined in "transform_mapping" nodes are applied automatically.
+//
+//	Request:  POST /api/v1/webhooks/{workflowId}
+//	          X-API-Key: <tenant api key>
+//	          Body: { "cariKodu": "ABC123" }
+//
+//	Response: { "runId": "...", "status": "SUCCESS", "data": { ... } }
+func (h *WorkflowHandler) Webhook(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFromContext(r.Context())
+	workflowID := r.PathValue("workflowId")
+
+	var payload map[string]interface{}
+	_ = decode(r, &payload)
+	if payload == nil {
+		payload = map[string]interface{}{}
+	}
+
+	result, err := h.svc.Trigger(r.Context(), workflowID, claims.TenantID, payload)
+	if err != nil {
+		status := http.StatusUnprocessableEntity
+		if err.Error() == "workflow is disabled" {
+			status = http.StatusConflict
+		}
+		respondError(w, status, err.Error())
+		return
+	}
+	respond(w, http.StatusOK, map[string]interface{}{
+		"runId":  result.Run.ID,
+		"status": result.Run.Status,
+		"data":   result.AgentModel,
+	})
+}

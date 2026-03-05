@@ -64,3 +64,12 @@ type AgentRepository interface {
 	FindByTenant(ctx context.Context, tenantID string) (*Agent, error)
 	Upsert(ctx context.Context, a *Agent) error
 }
+
+// ─── TenantAgentRepository ───────────────────────────────────────────────────
+
+// TenantAgentRepository manages the outbound LOGO ERP agent configuration per tenant.
+type TenantAgentRepository interface {
+	FindByTenant(ctx context.Context, tenantID string) (*TenantAgent, error)
+	Upsert(ctx context.Context, a *TenantAgent) error
+	Delete(ctx context.Context, tenantID string) error
+}

@@ -33,12 +33,13 @@ func main() {
 	// ─── Repositories ─────────────────────────────────────────────────────────
 	// Connect to PostgreSQL when DATABASE_URL is set; fall back to in-memory.
 	var (
-		tenantRepo   domain.TenantRepository
-		userRepo     domain.UserRepository
-		workflowRepo domain.WorkflowRepository
-		runRepo      domain.WorkflowRunRepository
-		endpointRepo domain.ApiEndpointRepository
-		agentRepo    domain.AgentRepository
+		tenantRepo      domain.TenantRepository
+		userRepo        domain.UserRepository
+		workflowRepo    domain.WorkflowRepository
+		runRepo         domain.WorkflowRunRepository
+		endpointRepo    domain.ApiEndpointRepository
+		agentRepo       domain.AgentRepository
+		tenantAgentRepo domain.TenantAgentRepository
 	)
 
 	ctx := context.Background()
@@ -50,45 +51,49 @@ func main() {
 			goto useMemory
 		}
 		log.Info().Str("db", cfg.DatabaseURL).Msg("connected to PostgreSQL")
-		tenantRepo   = pgrepo.NewTenantRepo(db)
-		userRepo     = pgrepo.NewUserRepo(db)
-		workflowRepo = pgrepo.NewWorkflowRepo(db)
-		runRepo      = pgrepo.NewWorkflowRunRepo(db)
-		endpointRepo = pgrepo.NewApiEndpointRepo(db)
-		agentRepo    = pgrepo.NewAgentRepo(db)
+		tenantRepo      = pgrepo.NewTenantRepo(db)
+		userRepo        = pgrepo.NewUserRepo(db)
+		workflowRepo    = pgrepo.NewWorkflowRepo(db)
+		runRepo         = pgrepo.NewWorkflowRunRepo(db)
+		endpointRepo    = pgrepo.NewApiEndpointRepo(db)
+		agentRepo       = pgrepo.NewAgentRepo(db)
+		tenantAgentRepo = pgrepo.NewTenantAgentRepo(db)
 		goto startServer
 	}
 
 useMemory:
 	log.Info().Msg("using in-memory repository store")
-	tenantRepo   = memrepo.NewTenantRepo()
-	userRepo     = memrepo.NewUserRepo()
-	workflowRepo = memrepo.NewWorkflowRepo()
-	runRepo      = memrepo.NewWorkflowRunRepo()
-	endpointRepo = memrepo.NewApiEndpointRepo()
-	agentRepo    = memrepo.NewAgentRepo()
+	tenantRepo      = memrepo.NewTenantRepo()
+	userRepo        = memrepo.NewUserRepo()
+	workflowRepo    = memrepo.NewWorkflowRepo()
+	runRepo         = memrepo.NewWorkflowRunRepo()
+	endpointRepo    = memrepo.NewApiEndpointRepo()
+	agentRepo       = memrepo.NewAgentRepo()
+	tenantAgentRepo = memrepo.NewTenantAgentRepo()
 
 startServer:
 	// ─── Services ─────────────────────────────────────────────────────────────
-	jwtSvc      := service.NewJWTService(cfg.JWTSecret, cfg.JWTTTLHours)
-	authSvc     := service.NewAuthService(userRepo, jwtSvc)
-	tenantSvc   := service.NewTenantService(tenantRepo)
-	workflowSvc := service.NewWorkflowService(workflowRepo, runRepo)
-	endpointSvc := service.NewApiEndpointService(endpointRepo)
-	cariSvc     := service.NewCariKontrolService(endpointRepo, agentRepo)
-	agentSvc    := service.NewAgentService(agentRepo)
+	jwtSvc          := service.NewJWTService(cfg.JWTSecret, cfg.JWTTTLHours)
+	authSvc         := service.NewAuthService(userRepo, jwtSvc)
+	tenantSvc       := service.NewTenantService(tenantRepo)
+	tenantAgentSvc  := service.NewTenantAgentService(tenantAgentRepo)
+	workflowSvc     := service.NewWorkflowService(workflowRepo, runRepo, tenantAgentRepo)
+	endpointSvc     := service.NewApiEndpointService(endpointRepo)
+	cariSvc         := service.NewCariKontrolService(endpointRepo, agentRepo)
+	agentSvc        := service.NewAgentService(agentRepo)
 
 	// ─── Handlers ─────────────────────────────────────────────────────────────
-	authH     := handler.NewAuthHandler(authSvc)
-	tenantH   := handler.NewTenantHandler(tenantSvc)
-	workflowH := handler.NewWorkflowHandler(workflowSvc)
-	endpointH := handler.NewApiEndpointHandler(endpointSvc)
-	cariH     := handler.NewCariKontrolHandler(cariSvc)
-	agentH    := handler.NewAgentHandler(agentSvc, cariSvc)
+	authH         := handler.NewAuthHandler(authSvc)
+	tenantH       := handler.NewTenantHandler(tenantSvc)
+	tenantAgentH  := handler.NewTenantAgentHandler(tenantAgentSvc)
+	workflowH     := handler.NewWorkflowHandler(workflowSvc)
+	endpointH     := handler.NewApiEndpointHandler(endpointSvc)
+	cariH         := handler.NewCariKontrolHandler(cariSvc)
+	agentH        := handler.NewAgentHandler(agentSvc, cariSvc)
 
 	// ─── Router ───────────────────────────────────────────────────────────────
 	routes := router.New(jwtSvc, cfg.APIKeys,
-		authH, tenantH, workflowH, endpointH, cariH, agentH)
+		authH, tenantH, workflowH, endpointH, cariH, agentH, tenantAgentH)
 
 	// ─── Root handler (CORS + Logger wrapping the router) ─────────────────────
 	root := middleware.CORS(cfg.AllowedOrigins)(

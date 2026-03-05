@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   X, Plus, Save, RotateCcw, Link2, Layers, ChevronDown,
@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import {
-  NODE_TYPES, TARGET_MODELS, COLOR_MAP, getPaletteGroups, PALETTE_CATEGORIES,
+  NODE_TYPES, COLOR_MAP, getPaletteGroups, PALETTE_CATEGORIES,
 } from "../../lib/workflowNodeTypes";
 import { useWorkflowStore } from "../../store/workflowStore";
 
@@ -158,131 +158,7 @@ AgentRequest<T> {
 }`;
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€ ConfigField: renders a single configSchema field â”€â”€â”€â”€â”€â”€â”€â”€ */
-const TRANSFORMS = ["NONE", "LOWERCASE", "UPPERCASE", "TRIM", "FORMAT_PHONE_TR", "DATE_ISO"];
-
-function parseJsonFields(jsonStr) {
-  try {
-    const obj = JSON.parse(jsonStr);
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
-    const groups = [];
-    const rootFields = [];
-    for (const [key, val] of Object.entries(obj)) {
-      if (Array.isArray(val)) {
-        const sample = val.length > 0 && typeof val[0] === "object" ? val[0] : null;
-        const fields = sample
-          ? Object.keys(sample).map((f) => ({ path: `${key}[].${f}`, label: f }))
-          : [{ path: key, label: key }];
-        groups.push({ name: key, type: "array", count: val.length, fields });
-      } else if (val !== null && typeof val === "object") {
-        const fields = Object.keys(val).map((f) => ({ path: `${key}.${f}`, label: f }));
-        groups.push({ name: key, type: "object", fields });
-      } else {
-        rootFields.push({ path: key, label: key });
-      }
-    }
-    if (rootFields.length > 0) groups.unshift({ name: "__root__", type: "root", fields: rootFields });
-    return groups;
-  } catch { return null; }
-}
-
-function FieldMapEditor({ targetModelKey, samplePayload, value, onChange }) {
-  const mappings = Array.isArray(value) ? value : [];
-  const [expandedGroups, setExpandedGroups] = useState({});
-  const groups = useMemo(() => parseJsonFields(samplePayload || ""), [samplePayload]);
-  const modelDef = TARGET_MODELS[targetModelKey];
-  const targetFields = modelDef?.fields || [];
-  const targetGroups = useMemo(() => {
-    return targetFields.reduce((acc, f) => {
-      (acc[f.group] = acc[f.group] || []).push(f);
-      return acc;
-    }, {});
-  }, [targetFields]);
-
-  const getMapping = (path) =>
-    mappings.find((m) => m.source === path) || { source: path, target: "", transform: "NONE" };
-
-  const setMapping = (path, field, val) => {
-    const existing = mappings.find((m) => m.source === path);
-    const updated = { ...(existing || { source: path, target: "", transform: "NONE" }), [field]: val };
-    const next = existing
-      ? mappings.map((m) => (m.source === path ? updated : m))
-      : [...mappings, updated];
-    onChange("mappingRules", next);
-  };
-
-  if (!groups || groups.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-border p-3 text-center space-y-1">
-        <p className="text-[10px] text-muted-foreground">Henuz kaynak JSON yok.</p>
-        <p className="text-[10px] text-muted-foreground">
-          Bagli tetikleyici nodunda <span className="font-mono bg-muted px-1 rounded">Ornek Payload</span> alanini doldurun.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {groups.map((group) => {
-        const isRoot = group.name === "__root__";
-        const expanded = expandedGroups[group.name] !== false;
-        const typeChip = group.type === "array" ? `dizi � ${group.count}` : group.type === "object" ? "nesne" : null;
-        return (
-          <div key={group.name} className="rounded-lg border border-border overflow-hidden">
-            {!isRoot && (
-              <button
-                onClick={() => setExpandedGroups((p) => ({ ...p, [group.name]: !expanded }))}
-                className="w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-muted/60 text-[10px] font-semibold text-foreground hover:bg-muted transition-colors"
-              >
-                <ChevronRight size={10} className={`transition-transform flex-shrink-0 ${expanded ? "rotate-90" : ""}`} />
-                <span className="flex-1 text-left truncate font-mono text-violet-700">{group.name}</span>
-                {typeChip && (
-                  <span className="text-[9px] text-muted-foreground font-normal bg-background px-1.5 py-0.5 rounded-full border border-border flex-shrink-0">{typeChip}</span>
-                )}
-              </button>
-            )}
-            {(isRoot || expanded) && (
-              <div className="divide-y divide-border/40">
-                {group.fields.map((f) => {
-                  const m = getMapping(f.path);
-                  return (
-                    <div key={f.path} className="px-2 pt-1.5 pb-2 space-y-1">
-                      <code className="block text-[10px] font-mono text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded truncate">{f.label}</code>
-                      <div className="flex gap-1">
-                        <select
-                          value={m.target}
-                          onChange={(e) => setMapping(f.path, "target", e.target.value)}
-                          className="flex-1 h-6 rounded border border-input bg-background px-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring min-w-0"
-                        >
-                          <option value="">� hedef �</option>
-                          {Object.entries(targetGroups).map(([grp, fields]) => (
-                            <optgroup key={grp} label={grp}>
-                              {fields.map((t) => (
-                                <option key={t.field} value={t.field}>{t.field}</option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
-                        <select
-                          value={m.transform}
-                          onChange={(e) => setMapping(f.path, "transform", e.target.value)}
-                          className="w-[76px] h-6 rounded border border-input bg-background px-1 text-[9px] focus:outline-none focus:ring-1 focus:ring-ring flex-shrink-0"
-                        >
-                          {TRANSFORMS.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-function ConfigField({ field, value, onChange, extraContext }) {
+function ConfigField({ field, value, onChange }) {
   const current = value !== undefined ? value : field.defaultValue;
 
   if (field.type === "text") {
@@ -349,20 +225,6 @@ function ConfigField({ field, value, onChange, extraContext }) {
         <pre className="w-full rounded-lg bg-slate-900 text-emerald-400 px-3 py-2.5 text-[10px] font-mono overflow-x-auto whitespace-pre leading-relaxed">
           {current}
         </pre>
-      </div>
-    );
-  }
-
-  if (field.type === "fieldmap") {
-    return (
-      <div>
-        <label className="text-[11px] font-medium text-muted-foreground block mb-2">{field.label}</label>
-        <FieldMapEditor
-          targetModelKey={extraContext?.targetModel || "CariModel"}
-          samplePayload={extraContext?.samplePayload || ""}
-          value={value}
-          onChange={onChange}
-        />
       </div>
     );
   }
@@ -573,6 +435,42 @@ function TemplateModal({ onClose, onSelect }) {
   );
 }
 
+/* -------- WebhookUrlBox: shown in trigger_http_json config panel -------- */
+const WEBHOOK_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+
+function WebhookUrlBox({ workflowId }) {
+  const [copied, setCopied] = useState(false);
+  const url = `${WEBHOOK_BASE}/api/v1/webhooks/${workflowId}`;
+  const copy = () => {
+    navigator.clipboard.writeText(url).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <Server size={11} className="text-blue-600 flex-shrink-0" />
+        <span className="text-[10px] font-semibold text-blue-700">Webhook URL</span>
+        <span className="ml-auto text-[9px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full border border-blue-200">POST</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <code className="flex-1 text-[9px] font-mono text-blue-800 bg-white border border-blue-100 rounded px-1.5 py-1 truncate select-all">
+          {url}
+        </code>
+        <button
+          onClick={copy}
+          className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded border border-blue-200 bg-white text-blue-600 hover:bg-blue-100 transition-colors"
+        >
+          {copied ? <Check size={10} /> : <Copy size={10} />}
+        </button>
+      </div>
+      <p className="text-[9px] text-blue-600 leading-snug">
+        Dış sistem bu URL'i çağırır. Header: <code className="font-mono">X-API-Key: &lt;api-key&gt;</code>
+      </p>
+    </div>
+  );
+}
+
 /* -------- Help / Component Guide Modal -------- */
 function HelpModal({ onClose }) {
   const [copied, setCopied] = useState(false);
@@ -664,7 +562,7 @@ function HelpModal({ onClose }) {
 export default function WorkflowBuilderPage() {
   const { workflowId } = useParams();
   const navigate = useNavigate();
-  const { getWorkflow, saveWorkflow } = useWorkflowStore();
+  const { getWorkflow, saveWorkflow, fetchWorkflows } = useWorkflowStore();
 
   const [nodes, setNodes] = useState([]);
   const [connections, setConnections] = useState([]);
@@ -679,14 +577,25 @@ export default function WorkflowBuilderPage() {
     () => Object.fromEntries(PALETTE_CATEGORIES.map((c) => [c, true]))
   );
 
-  /* Load workflow from store when workflowId changes */
+  /* Load workflow – try store first, fallback to backend fetch */
   useEffect(() => {
     if (!workflowId) return;
     const wf = getWorkflow(workflowId);
-    if (!wf) return;
-    setWorkflowName(wf.name);
-    setNodes(wf.nodes ?? []);
-    setConnections(wf.connections ?? []);
+    if (wf) {
+      setWorkflowName(wf.name);
+      setNodes(wf.nodes ?? []);
+      setConnections(wf.connections ?? []);
+      setSelectedNodeId(null); setPendingFrom(null); setConnectMode(false);
+      return;
+    }
+    // Store empty (direct URL access) – fetch all and reload
+    fetchWorkflows().then(() => {
+      const reloaded = getWorkflow(workflowId);
+      if (!reloaded) return;
+      setWorkflowName(reloaded.name);
+      setNodes(reloaded.nodes ?? []);
+      setConnections(reloaded.connections ?? []);
+    });
     setSelectedNodeId(null);
     setPendingFrom(null);
     setConnectMode(false);
@@ -824,9 +733,9 @@ export default function WorkflowBuilderPage() {
     setSelectedNodeId(null); setPendingFrom(null);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (workflowId) {
-      saveWorkflow(workflowId, { name: workflowName, nodes, connections });
+      await saveWorkflow(workflowId, { name: workflowName, nodes, connections });
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -1014,28 +923,19 @@ export default function WorkflowBuilderPage() {
 
               {/* Config fields */}
               <div className="p-3 space-y-3">
-                {(() => {
-                  // Compute extraContext for transform_mapping field mapping editor
-                  let configExtraContext = null;
-                  if (selectedNode.type === "transform_mapping") {
-                    const targetModel = selectedNode.config?.targetModel || "CariModel";
-                    let samplePayload = "";
-                    for (const conn of connections.filter((c) => c.toId === selectedNode.id)) {
-                      const up = nodes.find((n) => n.id === conn.fromId);
-                      if (up?.config?.samplePayload) { samplePayload = up.config.samplePayload; break; }
-                    }
-                    configExtraContext = { targetModel, samplePayload };
-                  }
-                  return (selectedDef.configSchema || []).map((field) => (
-                    <ConfigField
-                      key={field.key}
-                      field={field}
-                      value={selectedNode.config?.[field.key]}
-                      onChange={(key, val) => handleConfigChange(selectedNode.id, key, val)}
-                      extraContext={configExtraContext}
-                    />
-                  ));
-                })()}
+                {(selectedDef.configSchema || []).map((field) => (
+                  <ConfigField
+                    key={field.key}
+                    field={field}
+                    value={selectedNode.config?.[field.key]}
+                    onChange={(key, val) => handleConfigChange(selectedNode.id, key, val)}
+                  />
+                ))}
+
+                {/* ── Webhook URL (shown when trigger_http_json is saved) ── */}
+                {selectedNode.type === "trigger_http_json" && workflowId && (
+                  <WebhookUrlBox workflowId={workflowId} />
+                )}
 
                 {/* ---- Input Parameters (for typed nodes) ---- */}
                 {selectedDef.inputs?.length > 0 && (

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useWorkflowStore } from "../../store/workflowStore";
 import {
@@ -210,9 +210,12 @@ function StatsModal({ workflow, onClose }) {
 /* ─── Main Page ─── */
 export default function WorkflowListPage() {
   const navigate = useNavigate();
-  const { workflows, createWorkflow, toggleEnabled, deleteWorkflow } = useWorkflowStore();
+  const { workflows, createWorkflow, toggleEnabled, deleteWorkflow, fetchWorkflows } = useWorkflowStore();
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [statsTarget, setStatsTarget] = useState(null);
+
+  /* Load workflows from backend on mount */
+  useEffect(() => { fetchWorkflows(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Delete */
   const confirmDelete = () => {
@@ -220,10 +223,10 @@ export default function WorkflowListPage() {
     setDeleteTarget(null);
   };
 
-  /* New workflow: create in store then navigate to builder */
-  const handleNewWorkflow = () => {
-    const id = createWorkflow();
-    navigate(`/tenant/workflows/builder/${id}`);
+  /* New workflow: create in backend then navigate to builder */
+  const handleNewWorkflow = async () => {
+    const id = await createWorkflow();
+    if (id) navigate(`/tenant/workflows/builder/${id}`);
   };
 
   /* Summary totals */

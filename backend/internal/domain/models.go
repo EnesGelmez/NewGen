@@ -210,6 +210,21 @@ type Agent struct {
 	RegisteredAt  time.Time   `json:"registeredAt"`
 }
 
+// ─── TenantAgent ────────────────────────────────────────────────────────────────
+
+// TenantAgent holds the outbound API configuration for a tenant's LOGO ERP integration.
+// Super Admins create/update this; the Trigger pipeline uses it to call the agent endpoint.
+type TenantAgent struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenantId"`
+	Name        string    `json:"name"`
+	EndpointURL string    `json:"endpointUrl"`
+	SecretKey   string    `json:"secretKey"`  // shown only to Super Admin
+	IsActive    bool      `json:"isActive"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
 // ─── CariKontrol (Cari Check) ─────────────────────────────────────────────────
 
 // CariKontrolRequest is the payload sent to the Cari Kontrol endpoint.

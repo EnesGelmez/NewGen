@@ -5,6 +5,7 @@ import LoginPage from "../pages/auth/LoginPage";
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import TenantListPage from "../pages/admin/TenantListPage";
 import NewTenantPage from "../pages/admin/NewTenantPage";
+import TenantAgentPage from "../pages/admin/TenantAgentPage";
 import RolesPage from "../pages/admin/RolesPage";
 import TenantDashboard from "../pages/tenant/TenantDashboard";
 import TenantUsersPage from "../pages/tenant/TenantUsersPage";
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
       { index: true, element: <AdminDashboard /> },
       { path: "tenants", element: <TenantListPage /> },
       { path: "tenants/new", element: <NewTenantPage /> },
+      { path: "tenants/:tenantId/agent", element: <TenantAgentPage /> },
       { path: "roles", element: <RolesPage /> },
       { path: "logs", element: <PlaceholderPage title="Sistem Logları" /> },
       { path: "analytics", element: <PlaceholderPage title="Analizler & Raporlar" /> },

@@ -29,6 +29,7 @@ func New(
 	endpointH *handler.ApiEndpointHandler,
 	cariH *handler.CariKontrolHandler,
 	agentH *handler.AgentHandler,
+	tenantAgentH *handler.TenantAgentHandler,
 ) http.Handler {
 
 	mux := http.NewServeMux()
@@ -49,6 +50,16 @@ func New(
 		chain(tenantH.Update, middleware.Auth(jwtSvc), middleware.RequireRole("SUPER_ADMIN")))
 	mux.HandleFunc("DELETE /api/v1/tenants/{id}",
 		chain(tenantH.Delete, middleware.Auth(jwtSvc), middleware.RequireRole("SUPER_ADMIN")))
+
+	// ─── Tenant Agent config (super-admin) ────────────────────────────────────────────────
+	mux.HandleFunc("GET /api/v1/tenants/{id}/agent",
+		chain(tenantAgentH.Get, middleware.Auth(jwtSvc), middleware.RequireRole("SUPER_ADMIN")))
+	mux.HandleFunc("PUT /api/v1/tenants/{id}/agent",
+		chain(tenantAgentH.Save, middleware.Auth(jwtSvc), middleware.RequireRole("SUPER_ADMIN")))
+	mux.HandleFunc("DELETE /api/v1/tenants/{id}/agent",
+		chain(tenantAgentH.Delete, middleware.Auth(jwtSvc), middleware.RequireRole("SUPER_ADMIN")))
+	mux.HandleFunc("POST /api/v1/tenants/{id}/agent/generate-secret",
+		chain(tenantAgentH.GenerateSecret, middleware.Auth(jwtSvc), middleware.RequireRole("SUPER_ADMIN")))
 
 	// ─── Workflows ────────────────────────────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/workflows",
@@ -87,6 +98,10 @@ func New(
 	// ─── Cari Kontrol (external callers use API-Key) ──────────────────────────
 	mux.HandleFunc("POST /api/v1/cari-kontrol",
 		chain(cariH.Check, middleware.APIKeyAuth(apiKeys)))
+
+	// ─── Public Webhooks (external systems trigger workflows via API-Key) ─────
+	mux.HandleFunc("POST /api/v1/webhooks/{workflowId}",
+		chain(workflowH.Webhook, middleware.APIKeyAuth(apiKeys)))
 
 	// ─── Agent ────────────────────────────────────────────────────────────────
 	mux.HandleFunc("GET /api/v1/agent/status",

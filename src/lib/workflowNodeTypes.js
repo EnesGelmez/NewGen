@@ -199,7 +199,6 @@ export const NODE_TYPES = {
     desc: "Gelen JSON alanlarını hedef veri modeline dönüştürür",
     configSchema: [
       { key: "targetModel", label: "Hedef Model", type: "select", options: ["CariModel", "SiparisModel", "FaturaModel", "IrsaliyeModel", "SatinAlmaModel"], defaultValue: "CariModel" },
-      { key: "mappingRules", label: "Alan Eşleştirmeleri", type: "fieldmap" },
     ],
   },
 

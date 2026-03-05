@@ -1,46 +1,63 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Search,
   Plus,
-  Filter,
-  MoreVertical,
   Building2,
-  Wifi,
-  WifiOff,
-  Eye,
-  Edit2,
-  Trash2,
   ChevronUp,
   ChevronDown,
+  Bot,
+  Eye,
+  Edit2,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
-import { Badge, StatusDot } from "../../components/ui/Badge";
+import { Card, CardContent, CardHeader } from "../../components/ui/Card";
+import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/Table";
-import { mockTenants } from "../../lib/mockData";
-import { formatDate } from "../../lib/utils";
+import { useAuthStore } from "../../store/authStore";
+
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 export default function TenantListPage() {
+  const navigate = useNavigate();
+  const { authHeader } = useAuthStore();
+  const [tenants, setTenants] = useState([]);
+  const [loadingTenants, setLoadingTenants] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all"); // all | online | offline
-  const [sortField, setSortField] = useState("companyName");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortField, setSortField] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
-  const [openMenu, setOpenMenu] = useState(null);
 
-  const filtered = mockTenants
+  useEffect(() => {
+    setLoadingTenants(true);
+    fetch(`${API}/api/v1/tenants`, { headers: authHeader() })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => setTenants(data ?? []))
+      .catch((e) => setFetchError(e.message))
+      .finally(() => setLoadingTenants(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filtered = tenants
     .filter((t) => {
+      const q = search.toLowerCase();
       const matchSearch =
-        t.companyName.toLowerCase().includes(search.toLowerCase()) ||
-        t.taxNumber.includes(search) ||
-        t.contactName.toLowerCase().includes(search.toLowerCase());
+        (t.name ?? "").toLowerCase().includes(q) ||
+        (t.subdomain ?? "").toLowerCase().includes(q) ||
+        (t.email ?? "").toLowerCase().includes(q);
       const matchStatus =
-        statusFilter === "all" || t.agentStatus === statusFilter;
+        statusFilter === "all" || t.status?.toLowerCase() === statusFilter;
       return matchSearch && matchStatus;
     })
     .sort((a, b) => {
-      let aVal = a[sortField];
-      let bVal = b[sortField];
+      let aVal = a[sortField] ?? "";
+      let bVal = b[sortField] ?? "";
       if (typeof aVal === "string") aVal = aVal.toLowerCase();
       if (typeof bVal === "string") bVal = bVal.toLowerCase();
       if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
@@ -89,9 +106,9 @@ export default function TenantListPage() {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: "Toplam Tenant", value: mockTenants.length, icon: Building2, color: "text-blue-600 bg-blue-50" },
-          { label: "Online Agent", value: mockTenants.filter((t) => t.agentStatus === "online").length, icon: Wifi, color: "text-emerald-600 bg-emerald-50" },
-          { label: "Offline Agent", value: mockTenants.filter((t) => t.agentStatus === "offline").length, icon: WifiOff, color: "text-red-600 bg-red-50" },
+          { label: "Toplam Tenant", value: tenants.length, icon: Building2, color: "text-blue-600 bg-blue-50" },
+          { label: "Aktif", value: tenants.filter((t) => t.status === "ACTIVE").length, icon: Building2, color: "text-emerald-600 bg-emerald-50" },
+          { label: "Trial / Askıya Alınmış", value: tenants.filter((t) => t.status !== "ACTIVE").length, icon: Building2, color: "text-red-600 bg-red-50" },
         ].map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl border border-border p-4 flex items-center gap-3">
             <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${stat.color}`}>
@@ -114,7 +131,7 @@ export default function TenantListPage() {
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Şirket adı, VKN, iletişim..."
+                placeholder="Şirket adı, subdomain, e-posta..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-9 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -125,8 +142,9 @@ export default function TenantListPage() {
             <div className="flex gap-1.5">
               {[
                 { value: "all", label: "Tümü" },
-                { value: "online", label: "Online" },
-                { value: "offline", label: "Offline" },
+                { value: "active", label: "Aktif" },
+                { value: "suspended", label: "Askıda" },
+                { value: "trial", label: "Trial" },
               ].map((f) => (
                 <button
                   key={f.value}
@@ -150,23 +168,33 @@ export default function TenantListPage() {
         </CardHeader>
 
         <CardContent className="p-0">
+          {loadingTenants ? (
+            <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground">
+              <Loader2 size={18} className="animate-spin" />
+              <span className="text-sm">Yükleniyor…</span>
+            </div>
+          ) : fetchError ? (
+            <div className="flex items-center gap-2 p-4 text-red-600 text-sm">
+              <AlertCircle size={15} />
+              Tenantlar yüklenemedi: {fetchError}
+            </div>
+          ) : (
+          <>
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead
                   className="cursor-pointer select-none"
-                  onClick={() => toggleSort("companyName")}
+                  onClick={() => toggleSort("name")}
                 >
                   <span className="flex items-center gap-1">
-                    Şirket <SortIcon field="companyName" />
+                    Şirket <SortIcon field="name" />
                   </span>
                 </TableHead>
-                <TableHead>Vergi No</TableHead>
-                <TableHead>İletişim</TableHead>
-                <TableHead>Agent</TableHead>
-                <TableHead>ERP DB</TableHead>
+                <TableHead>Subdomain</TableHead>
+                <TableHead>E-posta</TableHead>
+                <TableHead>Durum</TableHead>
                 <TableHead>Plan</TableHead>
-                <TableHead>Başarı Oranı</TableHead>
                 <TableHead
                   className="cursor-pointer select-none"
                   onClick={() => toggleSort("createdAt")}
@@ -184,49 +212,32 @@ export default function TenantListPage() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-600 flex-shrink-0">
-                        {tenant.companyName.charAt(0)}
+                        {(tenant.name ?? "?").charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <p className="font-medium text-foreground text-sm">
-                          {tenant.companyName}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          ID: {tenant.id}
-                        </p>
+                        <p className="font-medium text-foreground text-sm">{tenant.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{tenant.id}</p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <span className="font-mono text-xs text-foreground">
-                      {tenant.taxNumber}
-                    </span>
+                    <span className="font-mono text-xs text-foreground">{tenant.subdomain}</span>
                   </TableCell>
                   <TableCell>
-                    <p className="text-sm text-foreground">{tenant.contactName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {tenant.contactEmail}
-                    </p>
+                    <span className="text-sm text-foreground">{tenant.email}</span>
                   </TableCell>
                   <TableCell>
                     <Badge
                       variant={
-                        tenant.agentStatus === "online" ? "success" : "error"
+                        tenant.status === "ACTIVE"
+                          ? "success"
+                          : tenant.status === "TRIAL"
+                          ? "info"
+                          : "error"
                       }
                     >
-                      <StatusDot status={tenant.agentStatus} />
-                      {tenant.agentStatus === "online" ? "Online" : "Offline"}
+                      {tenant.status}
                     </Badge>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      v{tenant.agentVersion}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <span className="font-mono text-xs text-foreground">
-                      {tenant.logoErpDb}
-                    </span>
-                    <p className="text-[10px] text-muted-foreground">
-                      {tenant.logoErpVersion}
-                    </p>
                   </TableCell>
                   <TableCell>
                     <Badge
@@ -238,27 +249,8 @@ export default function TenantListPage() {
                           : "secondary"
                       }
                     >
-                      {tenant.plan}
+                      {tenant.plan ?? "—"}
                     </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 max-w-16 h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            tenant.stats.successRate >= 99
-                              ? "bg-emerald-500"
-                              : tenant.stats.successRate >= 97
-                              ? "bg-blue-500"
-                              : "bg-yellow-500"
-                          }`}
-                          style={{ width: `${tenant.stats.successRate}%` }}
-                        />
-                      </div>
-                      <span className="text-xs font-medium text-foreground">
-                        %{tenant.stats.successRate}
-                      </span>
-                    </div>
                   </TableCell>
                   <TableCell>
                     <span className="text-xs text-muted-foreground">
@@ -267,6 +259,13 @@ export default function TenantListPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => navigate(`/admin/tenants/${tenant.id}/agent`)}
+                        className="flex items-center gap-1 p-1.5 rounded-lg hover:bg-violet-50 text-muted-foreground hover:text-violet-600 transition-colors"
+                        title="Agent Yapılandır"
+                      >
+                        <Bot size={14} />
+                      </button>
                       <button className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Detay">
                         <Eye size={14} />
                       </button>
@@ -280,7 +279,7 @@ export default function TenantListPage() {
             </TableBody>
           </Table>
 
-          {filtered.length === 0 && (
+          {filtered.length === 0 && !loadingTenants && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Building2 size={32} className="text-muted-foreground mb-3" />
               <p className="text-sm font-medium text-foreground">
@@ -290,6 +289,8 @@ export default function TenantListPage() {
                 Arama kriterlerinizi değiştirmeyi deneyin
               </p>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>

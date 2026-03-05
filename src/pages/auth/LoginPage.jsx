@@ -8,24 +8,24 @@ import { Input } from "../../components/ui/Input";
 const DEMO_CREDENTIALS = [
   {
     label: "Super Admin",
-    email: "admin@nexus.io",
+    email: "admin@newgen.dev",
     pass: "admin123",
     color: "bg-purple-100 text-purple-700 border-purple-200",
     desc: "Tüm sistemi yönetir",
   },
   {
-    label: "Tenant Admin",
-    email: "demo@tenant.com",
-    pass: "demo123",
+    label: "Arçelik Admin",
+    email: "admin@arcelik.com",
+    pass: "admin123",
     color: "bg-blue-100 text-blue-700 border-blue-200",
     desc: "Arçelik A.Ş. — Tenant Yöneticisi",
   },
   {
-    label: "Tenant Kullanıcı",
-    email: "user@tenant.com",
-    pass: "user123",
+    label: "Beko Admin",
+    email: "admin@beko.com",
+    pass: "admin123",
     color: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    desc: "Arçelik A.Ş. — Entegrasyon Uzmanı",
+    desc: "Beko A.Ş. — Tenant Yöneticisi",
   },
 ];
 
@@ -43,7 +43,7 @@ export default function LoginPage() {
     const success = await login(email, password);
     if (success) {
       const user = useAuthStore.getState().user;
-      if (user.role === "super_admin") {
+      if (user.role === "SUPER_ADMIN") {
         navigate("/admin");
       } else {
         navigate("/tenant");
