@@ -11,6 +11,8 @@ import {
   Edit2,
   Loader2,
   AlertCircle,
+  X,
+  Save,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../../components/ui/Card";
 import { Badge } from "../../components/ui/Badge";
@@ -30,6 +32,9 @@ export default function TenantListPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortField, setSortField] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
+  const [editingTenant, setEditingTenant] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setLoadingTenants(true);
@@ -71,6 +76,31 @@ export default function TenantListPage() {
     } else {
       setSortField(field);
       setSortDir("asc");
+    }
+  };
+
+  const openEdit = (tenant) => {
+    setEditForm({ name: tenant.name, email: tenant.email, plan: tenant.plan ?? "Starter", status: tenant.status });
+    setEditingTenant(tenant);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingTenant) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`${API}/api/v1/tenants/${editingTenant.id}`, {
+        method: "PUT",
+        headers: { ...authHeader(), "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const updated = await r.json();
+      setTenants((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      setEditingTenant(null);
+    } catch (e) {
+      alert("Kayıt başarısız: " + e.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -266,10 +296,18 @@ export default function TenantListPage() {
                       >
                         <Bot size={14} />
                       </button>
-                      <button className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Detay">
+                      <button
+                        onClick={() => navigate(`/admin/tenants/${tenant.id}/agent`)}
+                        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                        title="Detay"
+                      >
                         <Eye size={14} />
                       </button>
-                      <button className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Düzenle">
+                      <button
+                        onClick={() => openEdit(tenant)}
+                        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                        title="Düzenle"
+                      >
                         <Edit2 size={14} />
                       </button>
                     </div>
@@ -294,6 +332,74 @@ export default function TenantListPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Edit Tenant Modal ── */}
+      {editingTenant && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-border overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="text-sm font-semibold text-foreground">Tenant Düzenle</h2>
+              <button onClick={() => setEditingTenant(null)} className="p-1.5 rounded-lg hover:bg-muted">
+                <X size={15} className="text-muted-foreground" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Şirket Adı</label>
+                <input
+                  value={editForm.name ?? ""}
+                  onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">E-posta</label>
+                <input
+                  value={editForm.email ?? ""}
+                  onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Plan</label>
+                <select
+                  value={editForm.plan ?? "Starter"}
+                  onChange={(e) => setEditForm((p) => ({ ...p, plan: e.target.value }))}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {["Starter", "Business", "Enterprise"].map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Durum</label>
+                <select
+                  value={editForm.status ?? "ACTIVE"}
+                  onChange={(e) => setEditForm((p) => ({ ...p, status: e.target.value }))}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {["ACTIVE", "TRIAL", "SUSPENDED"].map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <button
+                onClick={() => setEditingTenant(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={saving}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

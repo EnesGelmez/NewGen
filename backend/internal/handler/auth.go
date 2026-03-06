@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/service"
 )
 
 // AuthHandler handles login / logout.
@@ -47,4 +47,19 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"tenantId": claims.TenantID,
 		"role":     claims.Role,
 	})
+}
+
+// POST /api/v1/auth/change-password
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFromContext(r.Context())
+	var req service.ChangePasswordRequest
+	if err := decode(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
+		return
+	}
+	if err := h.svc.ChangePassword(r.Context(), claims.UserID, req); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respond(w, http.StatusOK, map[string]string{"message": "şifre güncellendi"})
 }

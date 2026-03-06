@@ -4,7 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/domain"
+	"github.com/nexus/backend/internal/service"
 )
 
 // WorkflowHandler serves /api/v1/workflows.
@@ -14,6 +15,18 @@ type WorkflowHandler struct {
 
 func NewWorkflowHandler(svc *service.WorkflowService) *WorkflowHandler {
 	return &WorkflowHandler{svc: svc}
+}
+
+// GET /api/v1/workflows/stats
+// Returns aggregated run statistics for the authenticated tenant (last 24 h).
+func (h *WorkflowHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFromContext(r.Context())
+	stats, err := h.svc.Stats(r.Context(), claims.TenantID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respond(w, http.StatusOK, stats)
 }
 
 // GET /api/v1/workflows
@@ -115,12 +128,41 @@ func (h *WorkflowHandler) Runs(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, runs)
 }
 
+// GET /api/v1/runs
+// Returns all run summaries for the authenticated tenant, newest first.
+func (h *WorkflowHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFromContext(r.Context())
+	limitStr := r.URL.Query().Get("limit")
+	limit, _ := strconv.Atoi(limitStr)
+	runs, err := h.svc.ListRuns(r.Context(), claims.TenantID, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if runs == nil {
+		runs = []domain.WorkflowRunSummary{}
+	}
+	respond(w, http.StatusOK, runs)
+}
+
+// GET /api/v1/runs/{id}
+// Returns the full execution record for a single run including payload and result.
+func (h *WorkflowHandler) GetRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := h.svc.GetRunByID(r.Context(), id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respond(w, http.StatusOK, run)
+}
+
 // POST /api/v1/workflows/{id}/trigger
 // Manually trigger a workflow run.
 //
 // The service scans the workflow's nodes:
-//   - If a "custom_cari_check" node is present → agentModel.cariKontrolEdilecekMi = true
-//   - Otherwise → false
+//   - If a "custom_cari_check" node is present â†’ agentModel.cariKontrolEdilecekMi = true
+//   - Otherwise â†’ false
 //
 // The built agentModel is returned in the response so callers can inspect what
 // would be forwarded to the on-premise Agent.
@@ -137,16 +179,11 @@ func (h *WorkflowHandler) Trigger(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	respond(w, http.StatusAccepted, map[string]interface{}{
-		"runId":      result.Run.ID,
-		"status":     result.Run.Status,
-		"workflowId": id,
-		"agentModel": result.AgentModel,
-	})
+	respond(w, http.StatusAccepted, buildTriggerResponse(result))
 }
 
 // POST /api/v1/webhooks/{workflowId}
-// Public webhook endpoint for external systems – authenticated via X-API-Key header.
+// Public webhook endpoint for external systems â€“ authenticated via X-API-Key header.
 // Triggers the given workflow with the provided JSON payload.
 // Field mappings defined in "transform_mapping" nodes are applied automatically.
 //
@@ -174,9 +211,5 @@ func (h *WorkflowHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		respondError(w, status, err.Error())
 		return
 	}
-	respond(w, http.StatusOK, map[string]interface{}{
-		"runId":  result.Run.ID,
-		"status": result.Run.Status,
-		"data":   result.AgentModel,
-	})
+	respond(w, http.StatusOK, buildTriggerResponse(result))
 }

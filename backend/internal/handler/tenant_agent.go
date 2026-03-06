@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/service"
 )
 
 // TenantAgentHandler serves /api/v1/tenants/{id}/agent (super-admin only).
@@ -26,7 +26,7 @@ func (h *TenantAgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, a)
 }
 
-// PUT /api/v1/tenants/{id}/agent — create or update the agent configuration.
+// PUT /api/v1/tenants/{id}/agent â€” create or update the agent configuration.
 func (h *TenantAgentHandler) Save(w http.ResponseWriter, r *http.Request) {
 	tenantID := r.PathValue("id")
 	var req service.SaveTenantAgentRequest
@@ -60,7 +60,7 @@ func (h *TenantAgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// POST /api/v1/tenants/{id}/agent/generate-secret — convenience: just get a new secret key.
+// POST /api/v1/tenants/{id}/agent/generate-secret â€” convenience: just get a new secret key.
 func (h *TenantAgentHandler) GenerateSecret(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, map[string]string{"secretKey": h.svc.GenerateSecret()})
 }

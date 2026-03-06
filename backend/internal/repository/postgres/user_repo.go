@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 )
 
 // UserRepo is the PostgreSQL implementation of domain.UserRepository.
@@ -15,13 +15,13 @@ type UserRepo struct{ db *DB }
 
 func NewUserRepo(db *DB) *UserRepo { return &UserRepo{db: db} }
 
-const userCols = `id, tenant_id, name, email, password_hash, role, is_active, created_at, updated_at`
+const userCols = `id, tenant_id, name, email, password_hash, role, is_active, must_change_password, created_at, updated_at`
 
 func scanUser(row pgx.Row) (*domain.User, error) {
 	var u domain.User
 	var tenantID *string // nullable
 	err := row.Scan(&u.ID, &tenantID, &u.Name, &u.Email,
-		&u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+		&u.PasswordHash, &u.Role, &u.IsActive, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (r *UserRepo) FindAll(ctx context.Context, tenantID string) ([]domain.User,
 		var u domain.User
 		var tid *string
 		if err := rows.Scan(&u.ID, &tid, &u.Name, &u.Email,
-			&u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&u.PasswordHash, &u.Role, &u.IsActive, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if tid != nil {
@@ -81,9 +81,9 @@ func (r *UserRepo) Create(ctx context.Context, u *domain.User) error {
 		tid = &u.TenantID
 	}
 	_, err := r.db.Pool.Exec(ctx, `
-		INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		u.ID, tid, u.Name, u.Email, u.PasswordHash, u.Role, u.IsActive, u.CreatedAt, u.UpdatedAt)
+		INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active, must_change_password, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		u.ID, tid, u.Name, u.Email, u.PasswordHash, u.Role, u.IsActive, u.MustChangePassword, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -95,8 +95,8 @@ func (r *UserRepo) Update(ctx context.Context, u *domain.User) error {
 	}
 	_, err := r.db.Pool.Exec(ctx, `
 		UPDATE users SET tenant_id=$2, name=$3, email=$4, password_hash=$5,
-		role=$6, is_active=$7, updated_at=$8 WHERE id=$1`,
-		u.ID, tid, u.Name, u.Email, u.PasswordHash, u.Role, u.IsActive, u.UpdatedAt)
+		role=$6, is_active=$7, must_change_password=$8, updated_at=$9 WHERE id=$1`,
+		u.ID, tid, u.Name, u.Email, u.PasswordHash, u.Role, u.IsActive, u.MustChangePassword, u.UpdatedAt)
 	return err
 }
 

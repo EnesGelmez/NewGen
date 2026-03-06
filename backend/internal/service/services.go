@@ -6,16 +6,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// ─── AuthService ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ AuthService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // LoginRequest carries login credentials.
 type LoginRequest struct {
@@ -59,7 +60,34 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 	return &LoginResponse{Token: token, ExpiresAt: exp, User: *user}, nil
 }
 
-// ─── TenantService ────────────────────────────────────────────────────────────
+// ChangePasswordRequest carries the old and new passwords for a self-service change.
+type ChangePasswordRequest struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
+// ChangePassword validates the old password and sets the new one.
+func (s *AuthService) ChangePassword(ctx context.Context, userID string, req ChangePasswordRequest) error {
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("kullanıcı bulunamadı")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
+		return fmt.Errorf("mevcut şifre hatalı")
+	}
+	if len(req.NewPassword) < 6 {
+		return fmt.Errorf("yeni şifre en az 6 karakter olmalıdır")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	user.PasswordHash = string(hash)
+	user.MustChangePassword = false
+	return s.users.Update(ctx, user)
+}
+
+// â”€â”€â”€ TenantService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type TenantService struct {
 	repo domain.TenantRepository
@@ -91,12 +119,27 @@ func (s *TenantService) Create(ctx context.Context, req CreateTenantRequest) (*d
 		Email:      req.Email,
 		Status:     domain.TenantStatusTrial,
 		Plan:       req.Plan,
+		APIKey:     "ngk-" + uuid.New().String(),
 		AgentToken: uuid.New().String(),
 	}
 	if err := s.repo.Create(ctx, t); err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+// LookupByAPIKey resolves an incoming webhook API key to a tenantID.
+func (s *TenantService) LookupByAPIKey(ctx context.Context, apiKey string) (string, error) {
+	t, err := s.repo.FindByAPIKey(ctx, apiKey)
+	if err != nil {
+		return "", err
+	}
+	return t.ID, nil
+}
+
+// GetForOwner returns tenant data including the APIKey for self-service settings views.
+func (s *TenantService) GetForOwner(ctx context.Context, tenantID string) (*domain.Tenant, error) {
+	return s.repo.FindByID(ctx, tenantID)
 }
 
 func (s *TenantService) Update(ctx context.Context, id string, req CreateTenantRequest) (*domain.Tenant, error) {
@@ -116,7 +159,7 @@ func (s *TenantService) Update(ctx context.Context, id string, req CreateTenantR
 func (s *TenantService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
-// ─── TenantAgentService ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ TenantAgentService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type TenantAgentService struct {
 	repo domain.TenantAgentRepository
@@ -173,7 +216,103 @@ func (s *TenantAgentService) Delete(ctx context.Context, tenantID string) error 
 func (s *TenantAgentService) GenerateSecret() string {
 	return "agt-" + uuid.New().String()
 }
-// ─── WorkflowService ──────────────────────────────────────────────────────────
+
+// ─── UserService ──────────────────────────────────────────────────────────────
+
+type UserService struct {
+	repo domain.UserRepository
+}
+
+func NewUserService(repo domain.UserRepository) *UserService {
+	return &UserService{repo: repo}
+}
+
+// CreateUserRequest is the body for tenant-admin creating a new user.
+type CreateUserRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+	Password string `json:"password"`
+}
+
+// UpdateUserRequest is the body for editing an existing user.
+type UpdateUserRequest struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+func (s *UserService) List(ctx context.Context, tenantID string) ([]domain.User, error) {
+	users, err := s.repo.FindAll(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if users == nil {
+		users = []domain.User{}
+	}
+	return users, nil
+}
+
+func (s *UserService) Create(ctx context.Context, tenantID string, req CreateUserRequest) (*domain.User, error) {
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		return nil, fmt.Errorf("ad, e-posta ve şifre zorunludur")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	role := domain.UserRole(req.Role)
+	if role == "" {
+		role = domain.UserRoleViewer
+	}
+	u := &domain.User{
+		ID:                 uuid.New().String(),
+		TenantID:           tenantID,
+		Name:               req.Name,
+		Email:              req.Email,
+		PasswordHash:       string(hash),
+		Role:               role,
+		IsActive:           true,
+		MustChangePassword: true,
+	}
+	if err := s.repo.Create(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (s *UserService) Update(ctx context.Context, id string, req UpdateUserRequest) (*domain.User, error) {
+	u, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Name != "" {
+		u.Name = req.Name
+	}
+	if req.Role != "" {
+		u.Role = domain.UserRole(req.Role)
+	}
+	if err := s.repo.Update(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (s *UserService) Delete(ctx context.Context, id string) error {
+	return s.repo.Delete(ctx, id)
+}
+
+func (s *UserService) ToggleActive(ctx context.Context, id string) (*domain.User, error) {
+	u, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	u.IsActive = !u.IsActive
+	if err := s.repo.Update(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+// â”€â”€â”€ WorkflowService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type WorkflowService struct {
 	workflows  domain.WorkflowRepository
@@ -255,12 +394,32 @@ func (s *WorkflowService) Delete(ctx context.Context, id string) error {
 	return s.workflows.Delete(ctx, id)
 }
 
+// GetRunByID returns the full execution record for a single run.
+func (s *WorkflowService) GetRunByID(ctx context.Context, id string) (*domain.WorkflowRun, error) {
+	return s.runs.FindByID(ctx, id)
+}
+
 // GetRuns returns the N most recent execution records for a workflow.
 func (s *WorkflowService) GetRuns(ctx context.Context, workflowID string, limit int) ([]domain.WorkflowRun, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	return s.runs.FindByWorkflow(ctx, workflowID, limit)
+}
+
+// ListRuns returns the most recent run summaries across all workflows for a tenant.
+func (s *WorkflowService) ListRuns(ctx context.Context, tenantID string, limit int) ([]domain.WorkflowRunSummary, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	return s.runs.FindAllByTenant(ctx, tenantID, limit)
+}
+
+// Stats returns aggregated run statistics for all workflows belonging to a tenant
+// over the last 24 hours.
+func (s *WorkflowService) Stats(ctx context.Context, tenantID string) (*domain.TenantRunStats, error) {
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	return s.runs.StatsForTenant(ctx, tenantID, since)
 }
 
 // RecordRun simulates a workflow execution (test / trigger endpoint).
@@ -296,8 +455,9 @@ func (s *WorkflowService) RecordRun(
 
 // TriggerResult is what WorkflowService.Trigger returns.
 type TriggerResult struct {
-	Run        *domain.WorkflowRun    `json:"run"`
-	AgentModel map[string]interface{} `json:"agentModel"`
+	Run  *domain.WorkflowRun    `json:"run"`
+	Data map[string]interface{} `json:"data"` // pure agent response body
+	Meta map[string]interface{} `json:"meta"` // diagnostics + internal flags
 }
 
 // applyFieldMappings reads a transform_mapping node's config and remaps the
@@ -353,24 +513,80 @@ func applyFieldMappings(node domain.WorkflowNode, payload map[string]interface{}
 	return mapped
 }
 
-// callAgent attempts an HTTP POST to the agent endpoint.
-// Sends X-Agent-Secret header if a secret is provided.
-// Returns the agent's response body parsed as a map, or an error map on failure.
-func callAgent(ctx context.Context, endpoint, secret string, agentModel map[string]interface{}) map[string]interface{} {
+// getValueByPath extracts a value from a nested map using dot-notation.
+// Trailing "[]" suffixes on path segments are stripped so that arrays are
+// returned as-is (e.g. "islemler[]â€ â†’ the whole slice).
+func getValueByPath(data map[string]interface{}, path string) (interface{}, bool) {
+	path = strings.TrimSuffix(path, "[]")
+	parts := strings.SplitN(path, ".", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return nil, false
+	}
+	key := strings.TrimSuffix(parts[0], "[]")
+	val, ok := data[key]
+	if !ok {
+		return nil, false
+	}
+	if len(parts) == 1 {
+		return val, true
+	}
+	if nested, ok2 := val.(map[string]interface{}); ok2 {
+		return getValueByPath(nested, parts[1])
+	}
+	return nil, false
+}
+
+// applyModelMappings builds a new payload using the model_mapping node's
+// "mappings" config: { "targetPath": "sourcePath", ... }.
+// Fields with no mapping entry are dropped (strict mode).
+func applyModelMappings(mappings map[string]interface{}, payload map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{}, len(mappings))
+	for target, src := range mappings {
+		srcPath, _ := src.(string)
+		if srcPath == "" {
+			continue
+		}
+		if val, ok := getValueByPath(payload, srcPath); ok {
+			// Use the bare field name (strip [] suffix) as the key
+			targetKey := strings.TrimSuffix(target, "[]")
+			result[targetKey] = val
+		}
+	}
+	return result
+}
+
+// callAgent makes an HTTP request to the agent endpoint.
+// method is "POST", "GET", etc. For GET, no body is sent.
+// Sends X-API-Key header if a secret is provided.
+// Always returns a map with diagnostic fields.
+func callAgent(ctx context.Context, method, endpoint, secret string, agentModel map[string]interface{}) map[string]interface{} {
 	if endpoint == "" {
 		return map[string]interface{}{"_agentError": "no endpoint configured"}
 	}
-	body, err := json.Marshal(agentModel)
-	if err != nil {
-		return map[string]interface{}{"_agentError": "marshal error: " + err.Error()}
+	if method == "" {
+		method = http.MethodPost
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	var bodyBytes []byte
+	var bodyReader *bytes.Reader
+	if method != http.MethodGet && method != http.MethodHead {
+		var err error
+		bodyBytes, err = json.Marshal(agentModel)
+		if err != nil {
+			return map[string]interface{}{"_agentError": "marshal error: " + err.Error()}
+		}
+		bodyReader = bytes.NewReader(bodyBytes)
+	} else {
+		bodyReader = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bodyReader)
 	if err != nil {
 		return map[string]interface{}{"_agentError": "bad endpoint URL: " + err.Error(), "_agentEndpoint": endpoint}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if method != http.MethodGet && method != http.MethodHead {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if secret != "" {
-		req.Header.Set("X-Agent-Secret", secret)
+		req.Header.Set("X-API-Key", secret)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -378,12 +594,34 @@ func callAgent(ctx context.Context, endpoint, secret string, agentModel map[stri
 		return map[string]interface{}{"_agentError": err.Error(), "_agentEndpoint": endpoint}
 	}
 	defer resp.Body.Close() //nolint:errcheck
+	respBodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return map[string]interface{}{"_agentError": fmt.Sprintf("HTTP %d", resp.StatusCode), "_agentEndpoint": endpoint}
+		out := map[string]interface{}{
+			"_agentError":      fmt.Sprintf("HTTP %d", resp.StatusCode),
+			"_agentEndpoint":   endpoint,
+			"_agentStatusCode": resp.StatusCode,
+		}
+		// Include the agent's error response body so the caller can see the reason
+		if len(respBodyBytes) > 0 {
+			var errBody interface{}
+			if json.Unmarshal(respBodyBytes, &errBody) == nil {
+				out["_agentErrorBody"] = errBody
+			} else {
+				out["_agentErrorBody"] = string(respBodyBytes)
+			}
+		}
+		// Include the request body that was sent so the caller can debug
+		if len(bodyBytes) > 0 {
+			var sentBody interface{}
+			if json.Unmarshal(bodyBytes, &sentBody) == nil {
+				out["_agentSentBody"] = sentBody
+			}
+		}
+		return out
 	}
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		// Non-JSON response (e.g. plain string) — treat as success
+	if err := json.Unmarshal(respBodyBytes, &result); err != nil {
+		// Non-JSON or empty response â€” treat as success
 		return map[string]interface{}{"_agentCalled": true, "_agentEndpoint": endpoint, "_agentStatusCode": resp.StatusCode}
 	}
 	result["_agentEndpoint"] = endpoint
@@ -391,12 +629,43 @@ func callAgent(ctx context.Context, endpoint, secret string, agentModel map[stri
 	return result
 }
 
+// reachableNodes returns the IDs of nodes reachable from any trigger node by
+// following the directed edge graph. Nodes not connected to a trigger are excluded.
+func reachableNodes(nodes []domain.WorkflowNode, edges []domain.WorkflowEdge) map[string]struct{} {
+	adj := make(map[string][]string, len(edges))
+	for _, e := range edges {
+		adj[e.Source] = append(adj[e.Source], e.Target)
+	}
+	visited := make(map[string]struct{}, len(nodes))
+	queue := []string{}
+	for _, n := range nodes {
+		if strings.HasPrefix(n.Type, "trigger_") {
+			queue = append(queue, n.ID)
+		}
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if _, seen := visited[cur]; seen {
+			continue
+		}
+		visited[cur] = struct{}{}
+		for _, next := range adj[cur] {
+			if _, seen := visited[next]; !seen {
+				queue = append(queue, next)
+			}
+		}
+	}
+	return visited
+}
+
 // Trigger executes the full trigger logic for a workflow:
 //  1. Fetch the workflow and its nodes
-//  2. Apply field mappings from any "transform_mapping" node
-//  3. Scan nodes: if "custom_cari_check" or "custom_cari_kontrol" present → cariKontrolEdilecekMi = true
-//  4. Build the agent model and attempt to call the configured agent endpoint
-//  5. Record the run
+//  2. Determine the connected subgraph from trigger nodes via edges
+//  3. Apply field mappings only from connected transform_mapping nodes
+//  4. Scan connected nodes: feature flags + agent URL/method
+//  5. Build the agent model and attempt to call the configured agent endpoint
+//  6. Record the run
 func (s *WorkflowService) Trigger(
 	ctx context.Context,
 	workflowID, tenantID string,
@@ -410,93 +679,194 @@ func (s *WorkflowService) Trigger(
 		return nil, fmt.Errorf("workflow is disabled")
 	}
 
-	// Step 1: Apply field mappings from transform_mapping nodes.
+	// Step 1: Determine which nodes are reachable from a trigger via edges.
+	reachable := reachableNodes(wf.Nodes, wf.Edges)
+
+	// Step 2: Apply field mappings only from connected transform_mapping nodes.
 	mappedPayload := make(map[string]interface{}, len(userPayload))
 	for k, v := range userPayload {
 		mappedPayload[k] = v
 	}
 	for _, node := range wf.Nodes {
+		if _, ok := reachable[node.ID]; !ok {
+			continue
+		}
 		if node.Type == "transform_mapping" {
 			mappedPayload = applyFieldMappings(node, mappedPayload)
 		}
 	}
 
-	// Step 2: Look up the tenant agent configuration (endpoint + secret).
+	// Step 3: Look up the tenant agent configuration (endpoint + secret).
 	var agentEndpoint, agentSecret string
 	if ta, err := s.agentRepo.FindByTenant(ctx, tenantID); err == nil && ta.IsActive {
 		agentEndpoint = ta.EndpointURL
 		agentSecret = ta.SecretKey
 	}
 
-	// Step 3: Scan nodes — collect feature flags and append trigger path to agent base URL.
-	cariKontrolEdilecekMi := false
+	// Step 4: Scan connected nodes â€” collect feature flags and build the full agent URL + method.
+	hasCariCheck := false
+	cariCheckFlagName := "cariKontrolEdilecekMi" // configurable via node's flagName field
+	cariCheckFlagValue := true                    // configurable via node's boolean config
+	cariCheckNodeID := ""                         // used to look up cariKod connection
+	hasAgentRequest := false
+	hasModelMapping := false
+	var modelMappingConfig map[string]interface{}
+	agentMethod := http.MethodPost
 	for _, node := range wf.Nodes {
+		if _, ok := reachable[node.ID]; !ok {
+			continue
+		}
 		switch node.Type {
 		case "custom_cari_check", "custom_cari_kontrol":
-			cariKontrolEdilecekMi = true
-		case "trigger_http_json":
-			// Append the workflow-specific path to the tenant's agent base URL.
-			if agentEndpoint != "" {
-				if path, ok := node.Config["endpoint"].(string); ok && path != "" {
-					base := strings.TrimRight(agentEndpoint, "/")
-					p := "/" + strings.TrimLeft(path, "/")
-					agentEndpoint = base + p
+			hasCariCheck = true
+			cariCheckNodeID = node.ID
+			// Read configurable flag name from node config.
+			if fn, ok := node.Config["flagName"].(string); ok && fn != "" {
+				cariCheckFlagName = fn
+			}
+			// Read the boolean flag value from node config (defaults to true).
+			if cv, ok := node.Config["cariKontrolEdilecekMi"]; ok {
+				switch v := cv.(type) {
+				case bool:
+					cariCheckFlagValue = v
+				case string:
+					cariCheckFlagValue = v == "true"
+				}
+			}
+		case "model_mapping":
+			if ms, ok := node.Config["mappings"]; ok {
+				if mm, ok2 := ms.(map[string]interface{}); ok2 && len(mm) > 0 {
+					hasModelMapping = true
+					modelMappingConfig = mm
 				}
 			}
 		case "agent_request":
-			// Fallback: if no tenant agent is configured, use the node's endpoint.
-			if agentEndpoint == "" {
-				if ep, ok := node.Config["agentEndpoint"].(string); ok && ep != "" {
-					agentEndpoint = ep
-				}
+			hasAgentRequest = true
+			// Combine tenant base URL + node path.
+			if path, ok := node.Config["agentEndpoint"].(string); ok && path != "" {
+				base := strings.TrimRight(agentEndpoint, "/")
+				p := "/" + strings.TrimLeft(path, "/")
+				agentEndpoint = base + p
+			}
+			// HTTP method from node config (default POST).
+			if m, ok := node.Config["httpMethod"].(string); ok && m != "" {
+				agentMethod = strings.ToUpper(m)
 			}
 		}
 	}
 
-	// Step 4: Build the model that will be sent to the local Agent.
-	agentModel := make(map[string]interface{}, len(mappedPayload)+3)
-	for k, v := range mappedPayload {
+	// Step 5: Build the structured payload that will be sent to the local Agent.
+	// The final body shape is:
+	//   { "_meta": { ...feature flags... }, "data": { ...model fields... } }
+	// workflowId and triggeredAt go only into the run record, NOT into the agent body.
+	triggeredAt := time.Now().UTC()
+	var dataFields map[string]interface{}
+	if hasModelMapping {
+		dataFields = applyModelMappings(modelMappingConfig, mappedPayload)
+	} else {
+		dataFields = make(map[string]interface{}, len(mappedPayload))
+		for k, v := range mappedPayload {
+			dataFields[k] = v
+		}
+	}
+
+	// Build _meta section â€” populated by special control nodes.
+	metaFields := make(map[string]interface{})
+	if hasCariCheck {
+		metaFields[cariCheckFlagName] = cariCheckFlagValue
+		// If the cariKod input handle is connected, resolve the value from the payload.
+		for _, edge := range wf.Edges {
+			if edge.Target == cariCheckNodeID && edge.TargetHandle == "cariKod" {
+				if val, ok := getValueByPath(mappedPayload, "cariKod"); ok {
+					metaFields["cariKod"] = val
+				} else if val, ok := getValueByPath(mappedPayload, edge.SourceHandle); ok && edge.SourceHandle != "" && edge.SourceHandle != "output" {
+					metaFields["cariKod"] = val
+				}
+				break
+			}
+		}
+	}
+
+	// Compose the final agent model: _meta at top level alongside data fields.
+	agentModel := make(map[string]interface{}, len(dataFields)+1)
+	for k, v := range dataFields {
 		agentModel[k] = v
 	}
-	agentModel["cariKontrolEdilecekMi"] = cariKontrolEdilecekMi
-	agentModel["workflowId"] = workflowID
-	agentModel["triggeredAt"] = time.Now().UTC()
+	agentModel["_meta"] = metaFields
 
-	// Step 5: Attempt actual agent call; result always contains diagnostic fields.
-	agentResponse := callAgent(ctx, agentEndpoint, agentSecret, agentModel)
-	resultPayload := agentModel
+	// Step 6: Attempt agent call only if an agent_request node is in the connected flow.
+	var agentResponse map[string]interface{}
+	if hasAgentRequest {
+		agentResponse = callAgent(ctx, agentMethod, agentEndpoint, agentSecret, agentModel)
+	} else {
+		agentResponse = map[string]interface{}{"_agentSkipped": "no agent_request node in connected flow"}
+	}
+	agentData := make(map[string]interface{})
+	agentMeta := map[string]interface{}{
+		"workflowId":  workflowID,
+		"triggeredAt": triggeredAt,
+	}
 	for k, v := range agentResponse {
-		resultPayload[k] = v
+		if len(k) > 0 && k[0] == '_' {
+			agentMeta[k] = v
+		} else {
+			agentData[k] = v
+		}
 	}
 	if _, hasErr := agentResponse["_agentError"]; !hasErr {
-		resultPayload["_agentCalled"] = true
+		agentMeta["_agentCalled"] = true
+	}
+	// resultPayload stored in DB combines both for full record-keeping
+	resultPayload := make(map[string]interface{})
+	for k, v := range agentMeta {
+		resultPayload[k] = v
+	}
+	for k, v := range agentData {
+		resultPayload[k] = v
 	}
 
-	// Step 6: Record the run.
+	// Step 7: Record the run.
+	// If the agent returned an error (any _agentError key), the run is FAILED.
+	_, runFailed := agentResponse["_agentError"]
+	runStatus := domain.RunStatusSuccess
+	if runFailed {
+		runStatus = domain.RunStatusFailed
+	}
 	now := time.Now().UTC()
+	durationMs := now.Sub(triggeredAt).Milliseconds()
 	run := &domain.WorkflowRun{
 		ID:         uuid.New().String(),
 		WorkflowID: workflowID,
 		TenantID:   tenantID,
-		Status:     domain.RunStatusSuccess,
-		DurationMs: 0,
+		Status:     runStatus,
+		DurationMs: durationMs,
 		Payload:    userPayload,
 		Result:     resultPayload,
-		StartedAt:  now,
+		StartedAt:  triggeredAt,
 		FinishedAt: &now,
+	}
+	if runFailed {
+		errMsg, _ := agentMeta["_agentError"].(string)
+		if body, ok := agentMeta["_agentErrorBody"]; ok {
+			if bs, err := json.Marshal(body); err == nil {
+				errMsg = errMsg + " — " + string(bs)
+			}
+		}
+		run.ErrorMsg = errMsg
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return nil, err
 	}
-	_ = s.workflows.IncrementStats(ctx, workflowID, true, 0)
+	_ = s.workflows.IncrementStats(ctx, workflowID, !runFailed, durationMs)
 
 	return &TriggerResult{
-		Run:        run,
-		AgentModel: agentModel,
+		Run:  run,
+		Data: agentData,
+		Meta: agentMeta,
 	}, nil
 }
 
-// ─── ApiEndpointService ───────────────────────────────────────────────────────
+// â”€â”€â”€ ApiEndpointService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type ApiEndpointService struct {
 	repo domain.ApiEndpointRepository
@@ -564,7 +934,7 @@ func (s *ApiEndpointService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
 
-// ─── CariKontrolService ───────────────────────────────────────────────────────
+// â”€â”€â”€ CariKontrolService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // CariKontrolService implements the "Cari Kontrol" business operation.
 // Architecture:
@@ -606,7 +976,7 @@ func (s *CariKontrolService) BuildAgentModel(cariKod string, extra map[string]in
 	}
 }
 
-// ─── AgentService ────────────────────────────────────────────────────────────
+// â”€â”€â”€ AgentService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type AgentService struct {
 	repo domain.AgentRepository

@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/newgen/backend/internal/domain"
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/domain"
+	"github.com/nexus/backend/internal/service"
 )
 
 // CariKontrolHandler serves the Cari Kontrol endpoint exposed to external callers.

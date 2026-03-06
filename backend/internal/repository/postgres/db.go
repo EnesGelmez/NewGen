@@ -31,7 +31,34 @@ func New(ctx context.Context, connString string) (*DB, error) {
 	if err := pool.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("postgres: ping: %w", err)
 	}
-	return &DB{Pool: pool}, nil
+	db := &DB{Pool: pool}
+	if err := db.migrate(ctx); err != nil {
+		return nil, fmt.Errorf("postgres: migrate: %w", err)
+	}
+	return db, nil
+}
+
+// migrate applies incremental schema changes that may not have been included
+// in the original Docker init scripts (e.g. columns added in later migrations).
+func (db *DB) migrate(ctx context.Context) error {
+	stmts := []string{
+		// 003: per-tenant incoming webhook API key
+		`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS api_key TEXT NOT NULL DEFAULT ''`,
+		`UPDATE tenants SET api_key = 'ngk-' || gen_random_uuid()::text WHERE api_key = ''`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Pool.Exec(ctx, s); err != nil {
+			return fmt.Errorf("migrate stmt %q: %w", s[:min(40, len(s))], err)
+		}
+	}
+	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // Close releases all connections in the pool.

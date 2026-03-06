@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/google/uuid"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 )
 
 // TenantAgentRepo is the PostgreSQL implementation of domain.TenantAgentRepository.

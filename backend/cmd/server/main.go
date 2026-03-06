@@ -12,25 +12,25 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/newgen/backend/internal/config"
-	"github.com/newgen/backend/internal/domain"
-	"github.com/newgen/backend/internal/handler"
-	"github.com/newgen/backend/internal/middleware"
-	memrepo "github.com/newgen/backend/internal/repository/memory"
-	pgrepo "github.com/newgen/backend/internal/repository/postgres"
-	"github.com/newgen/backend/internal/router"
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/config"
+	"github.com/nexus/backend/internal/domain"
+	"github.com/nexus/backend/internal/handler"
+	"github.com/nexus/backend/internal/middleware"
+	memrepo "github.com/nexus/backend/internal/repository/memory"
+	pgrepo "github.com/nexus/backend/internal/repository/postgres"
+	"github.com/nexus/backend/internal/router"
+	"github.com/nexus/backend/internal/service"
 )
 
 func main() {
-	// ─── Logging ──────────────────────────────────────────────────────────────
+	// â”€â”€â”€ Logging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
-	// ─── Config ───────────────────────────────────────────────────────────────
+	// â”€â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	cfg := config.Load()
 
-	// ─── Repositories ─────────────────────────────────────────────────────────
+	// â”€â”€â”€ Repositories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Connect to PostgreSQL when DATABASE_URL is set; fall back to in-memory.
 	var (
 		tenantRepo      domain.TenantRepository
@@ -47,7 +47,7 @@ func main() {
 	if cfg.DatabaseURL != "" {
 		db, err := pgrepo.New(ctx, cfg.DatabaseURL)
 		if err != nil {
-			log.Warn().Err(err).Msg("PostgreSQL unavailable – falling back to in-memory store")
+			log.Warn().Err(err).Msg("PostgreSQL unavailable â€“ falling back to in-memory store")
 			goto useMemory
 		}
 		log.Info().Str("db", cfg.DatabaseURL).Msg("connected to PostgreSQL")
@@ -72,35 +72,37 @@ useMemory:
 	tenantAgentRepo = memrepo.NewTenantAgentRepo()
 
 startServer:
-	// ─── Services ─────────────────────────────────────────────────────────────
+	// â”€â”€â”€ Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	jwtSvc          := service.NewJWTService(cfg.JWTSecret, cfg.JWTTTLHours)
 	authSvc         := service.NewAuthService(userRepo, jwtSvc)
 	tenantSvc       := service.NewTenantService(tenantRepo)
 	tenantAgentSvc  := service.NewTenantAgentService(tenantAgentRepo)
+	userSvc         := service.NewUserService(userRepo)
 	workflowSvc     := service.NewWorkflowService(workflowRepo, runRepo, tenantAgentRepo)
 	endpointSvc     := service.NewApiEndpointService(endpointRepo)
 	cariSvc         := service.NewCariKontrolService(endpointRepo, agentRepo)
 	agentSvc        := service.NewAgentService(agentRepo)
 
-	// ─── Handlers ─────────────────────────────────────────────────────────────
+	// â”€â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	authH         := handler.NewAuthHandler(authSvc)
 	tenantH       := handler.NewTenantHandler(tenantSvc)
 	tenantAgentH  := handler.NewTenantAgentHandler(tenantAgentSvc)
+	userH         := handler.NewUserHandler(userSvc)
 	workflowH     := handler.NewWorkflowHandler(workflowSvc)
 	endpointH     := handler.NewApiEndpointHandler(endpointSvc)
 	cariH         := handler.NewCariKontrolHandler(cariSvc)
 	agentH        := handler.NewAgentHandler(agentSvc, cariSvc)
 
-	// ─── Router ───────────────────────────────────────────────────────────────
-	routes := router.New(jwtSvc, cfg.APIKeys,
-		authH, tenantH, workflowH, endpointH, cariH, agentH, tenantAgentH)
+	// â”€â”€â”€ Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	routes := router.New(jwtSvc, tenantSvc,
+authH, tenantH, workflowH, endpointH, cariH, agentH, tenantAgentH, userH)
 
-	// ─── Root handler (CORS + Logger wrapping the router) ─────────────────────
+	// â”€â”€â”€ Root handler (CORS + Logger wrapping the router) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	root := middleware.CORS(cfg.AllowedOrigins)(
 		middleware.Logger(routes),
 	)
 
-	// ─── HTTP Server ──────────────────────────────────────────────────────────
+	// â”€â”€â”€ HTTP Server â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      root,
@@ -113,13 +115,13 @@ startServer:
 	go func() {
 		log.Info().Str("addr", srv.Addr).
 			Str("swagger", "http://localhost:"+cfg.Port+"/swagger/").
-			Msg("NewGen backend started")
+			Msg("Nexus backend started")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal().Err(err).Msg("server error")
 		}
 	}()
 
-	// ─── Graceful shutdown ────────────────────────────────────────────────────
+	// â”€â”€â”€ Graceful shutdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

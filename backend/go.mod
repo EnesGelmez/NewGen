@@ -1,4 +1,4 @@
-module github.com/newgen/backend
+module github.com/nexus/backend
 
 go 1.22
 
@@ -20,3 +20,4 @@ require (
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
+

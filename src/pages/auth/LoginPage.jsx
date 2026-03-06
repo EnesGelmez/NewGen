@@ -8,7 +8,7 @@ import { Input } from "../../components/ui/Input";
 const DEMO_CREDENTIALS = [
   {
     label: "Super Admin",
-    email: "admin@newgen.dev",
+    email: "admin@nexus.dev",
     pass: "admin123",
     color: "bg-purple-100 text-purple-700 border-purple-200",
     desc: "Tüm sistemi yönetir",
@@ -42,8 +42,10 @@ export default function LoginPage() {
     clearError();
     const success = await login(email, password);
     if (success) {
-      const user = useAuthStore.getState().user;
-      if (user.role === "SUPER_ADMIN") {
+      const state = useAuthStore.getState();
+      if (state.mustChangePassword) {
+        navigate("/change-password");
+      } else if (state.user?.role === "SUPER_ADMIN") {
         navigate("/admin");
       } else {
         navigate("/tenant");
@@ -71,7 +73,7 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-blue-500 shadow-xl shadow-blue-500/30 mb-4">
             <Zap size={26} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white">NexusBridge</h1>
+          <h1 className="text-2xl font-bold text-white">Nexus</h1>
           <p className="text-sm text-white/50 mt-1">
             LOGO ERP Integration Platform
           </p>
@@ -178,7 +180,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-white/30 mt-6">
-          © 2026 NexusBridge · Enterprise Integration Platform
+          © 2026 Nexus · Enterprise Integration Platform
         </p>
       </div>
     </div>

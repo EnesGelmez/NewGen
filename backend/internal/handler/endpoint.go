@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/service"
 )
 
 // ApiEndpointHandler serves /api/v1/endpoints.

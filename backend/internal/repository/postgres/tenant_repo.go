@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 )
 
 // TenantRepo is the PostgreSQL implementation of domain.TenantRepository.
@@ -17,7 +17,7 @@ func NewTenantRepo(db *DB) *TenantRepo { return &TenantRepo{db: db} }
 
 func (r *TenantRepo) FindAll(ctx context.Context) ([]domain.Tenant, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, name, subdomain, email, status, plan, agent_token, created_at, updated_at
+		SELECT id, name, subdomain, email, status, plan, api_key, agent_token, created_at, updated_at
 		FROM tenants ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("tenants FindAll: %w", err)
@@ -28,7 +28,7 @@ func (r *TenantRepo) FindAll(ctx context.Context) ([]domain.Tenant, error) {
 	for rows.Next() {
 		var t domain.Tenant
 		if err := rows.Scan(&t.ID, &t.Name, &t.Subdomain, &t.Email,
-			&t.Status, &t.Plan, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.Status, &t.Plan, &t.APIKey, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -39,10 +39,10 @@ func (r *TenantRepo) FindAll(ctx context.Context) ([]domain.Tenant, error) {
 func (r *TenantRepo) FindByID(ctx context.Context, id string) (*domain.Tenant, error) {
 	var t domain.Tenant
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT id, name, subdomain, email, status, plan, agent_token, created_at, updated_at
+		SELECT id, name, subdomain, email, status, plan, api_key, agent_token, created_at, updated_at
 		FROM tenants WHERE id = $1`, id).
 		Scan(&t.ID, &t.Name, &t.Subdomain, &t.Email,
-			&t.Status, &t.Plan, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt)
+			&t.Status, &t.Plan, &t.APIKey, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("tenant %q not found", id)
 	}
@@ -52,12 +52,25 @@ func (r *TenantRepo) FindByID(ctx context.Context, id string) (*domain.Tenant, e
 func (r *TenantRepo) FindBySubdomain(ctx context.Context, subdomain string) (*domain.Tenant, error) {
 	var t domain.Tenant
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT id, name, subdomain, email, status, plan, agent_token, created_at, updated_at
+		SELECT id, name, subdomain, email, status, plan, api_key, agent_token, created_at, updated_at
 		FROM tenants WHERE subdomain = $1`, subdomain).
 		Scan(&t.ID, &t.Name, &t.Subdomain, &t.Email,
-			&t.Status, &t.Plan, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt)
+			&t.Status, &t.Plan, &t.APIKey, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("tenant %q not found", subdomain)
+	}
+	return &t, err
+}
+
+func (r *TenantRepo) FindByAPIKey(ctx context.Context, apiKey string) (*domain.Tenant, error) {
+	var t domain.Tenant
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT id, name, subdomain, email, status, plan, api_key, agent_token, created_at, updated_at
+		FROM tenants WHERE api_key = $1`, apiKey).
+		Scan(&t.ID, &t.Name, &t.Subdomain, &t.Email,
+			&t.Status, &t.Plan, &t.APIKey, &t.AgentToken, &t.CreatedAt, &t.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("invalid API key")
 	}
 	return &t, err
 }
@@ -67,9 +80,9 @@ func (r *TenantRepo) Create(ctx context.Context, t *domain.Tenant) error {
 	t.CreatedAt = now
 	t.UpdatedAt = now
 	_, err := r.db.Pool.Exec(ctx, `
-		INSERT INTO tenants (id, name, subdomain, email, status, plan, agent_token, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		t.ID, t.Name, t.Subdomain, t.Email, t.Status, t.Plan, t.AgentToken, t.CreatedAt, t.UpdatedAt)
+		INSERT INTO tenants (id, name, subdomain, email, status, plan, api_key, agent_token, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		t.ID, t.Name, t.Subdomain, t.Email, t.Status, t.Plan, t.APIKey, t.AgentToken, t.CreatedAt, t.UpdatedAt)
 	return err
 }
 

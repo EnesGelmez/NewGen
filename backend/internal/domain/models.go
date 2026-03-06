@@ -4,7 +4,7 @@ package domain
 
 import "time"
 
-// ─── Tenant ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Tenant â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // TenantStatus represents the lifecycle state of a tenant.
 type TenantStatus string
@@ -23,12 +23,13 @@ type Tenant struct {
 	Email       string       `json:"email"`
 	Status      TenantStatus `json:"status"`
 	Plan        string       `json:"plan"`
-	AgentToken  string       `json:"-"` // secret – never serialise to clients
+	APIKey      string       `json:"apiKey,omitempty"` // incoming webhook auth key (shown only to tenant owners)
+	AgentToken  string       `json:"-"`                // outgoing agent secret â€“ never serialise
 	CreatedAt   time.Time    `json:"createdAt"`
 	UpdatedAt   time.Time    `json:"updatedAt"`
 }
 
-// ─── User ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ User â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // UserRole defines the permission level of a platform user.
 type UserRole string
@@ -41,18 +42,19 @@ const (
 
 // User represents a human operator who can log in to the platform.
 type User struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenantId,omitempty"` // empty for SUPER_ADMIN
-	Name         string    `json:"name"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	Role         UserRole  `json:"role"`
-	IsActive     bool      `json:"isActive"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID                 string    `json:"id"`
+	TenantID           string    `json:"tenantId,omitempty"` // empty for SUPER_ADMIN
+	Name               string    `json:"name"`
+	Email              string    `json:"email"`
+	PasswordHash       string    `json:"-"`
+	Role               UserRole  `json:"role"`
+	IsActive           bool      `json:"isActive"`
+	MustChangePassword bool      `json:"mustChangePassword"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
-// ─── Workflow ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Workflow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // WorkflowStatus captures whether a workflow is accepting new runs.
 type WorkflowStatus string
@@ -108,7 +110,7 @@ type Workflow struct {
 	LastRunAt       *time.Time     `json:"lastRunAt,omitempty"`
 }
 
-// ─── WorkflowRun ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ WorkflowRun â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // RunStatus represents the outcome of a single workflow execution.
 type RunStatus string
@@ -133,7 +135,29 @@ type WorkflowRun struct {
 	FinishedAt  *time.Time             `json:"finishedAt,omitempty"`
 }
 
-// ─── ApiEndpoint ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ TenantRunStats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// WorkflowRunSummary is a lightweight run record used in dashboard stats and log pages.
+type WorkflowRunSummary struct {
+	RunID        string    `json:"runId"`
+	WorkflowID   string    `json:"workflowId"`
+	WorkflowName string    `json:"workflowName"`
+	Status       string    `json:"status"`
+	ErrorMsg     string    `json:"errorMsg,omitempty"`
+	StartedAt    time.Time `json:"startedAt"`
+	DurationMs   int64     `json:"durationMs"`
+}
+
+// TenantRunStats holds aggregated execution stats across all workflows for a tenant.
+type TenantRunStats struct {
+	Total           int                  `json:"total"`
+	Successful      int                  `json:"successful"`
+	Failed          int                  `json:"failed"`
+	ActiveWorkflows int                  `json:"activeWorkflows"`
+	RecentRuns      []WorkflowRunSummary `json:"recentRuns"`
+}
+
+// â”€â”€â”€ ApiEndpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // EndpointMethod is an HTTP verb.
 type EndpointMethod string
@@ -189,7 +213,7 @@ type EndpointResponse struct {
 	Example string `json:"example"`
 }
 
-// ─── Agent ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Agent â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // AgentStatus captures whether the local agent is reachable.
 type AgentStatus string
@@ -210,7 +234,7 @@ type Agent struct {
 	RegisteredAt  time.Time   `json:"registeredAt"`
 }
 
-// ─── TenantAgent ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ TenantAgent â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // TenantAgent holds the outbound API configuration for a tenant's LOGO ERP integration.
 // Super Admins create/update this; the Trigger pipeline uses it to call the agent endpoint.
@@ -225,7 +249,7 @@ type TenantAgent struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-// ─── CariKontrol (Cari Check) ─────────────────────────────────────────────────
+// â”€â”€â”€ CariKontrol (Cari Check) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // CariKontrolRequest is the payload sent to the Cari Kontrol endpoint.
 type CariKontrolRequest struct {

@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/newgen/backend/internal/middleware"
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/middleware"
+	"github.com/nexus/backend/internal/service"
 )
 
 // claimsFromContext is a convenience wrapper used by all handlers.
@@ -31,4 +31,45 @@ func respondError(w http.ResponseWriter, status int, msg string) {
 func decode(r *http.Request, dest any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(dest)
+}
+
+// buildTriggerResponse creates a clean, consistent response envelope for both
+// the webhook and manual trigger endpoints.
+//
+// Success shape:
+//
+//	{
+//	  "success": true,
+//	  "runId": "...",
+//	  "workflowId": "...",
+//	  "status": "SUCCESS",
+//	  "triggeredAt": "...",
+//	  "durationMs": 245,
+//	  "result": { ...agent response fields... }
+//	}
+//
+// Failure shape adds:
+//
+//	  "error": "HTTP 400 â€“ ..."
+func buildTriggerResponse(r *service.TriggerResult) map[string]interface{} {
+	success := r.Run.Status == "SUCCESS"
+	resp := map[string]interface{}{
+		"success":     success,
+		"runId":       r.Run.ID,
+		"workflowId":  r.Run.WorkflowID,
+		"triggeredAt": r.Run.StartedAt,
+		"result":      r.Data,
+	}
+	if !success {
+		if r.Run.ErrorMsg != "" {
+			resp["error"] = r.Run.ErrorMsg
+		}
+		if body, ok := r.Meta["_agentErrorBody"]; ok {
+			resp["agentError"] = body
+		}
+		if sent, ok := r.Meta["_agentSentBody"]; ok {
+			resp["sentPayload"] = sent
+		}
+	}
+	return resp
 }

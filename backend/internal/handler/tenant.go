@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/service"
 )
 
 // TenantHandler serves /api/v1/tenants (super-admin only).
@@ -13,6 +13,22 @@ type TenantHandler struct {
 
 func NewTenantHandler(svc *service.TenantService) *TenantHandler {
 	return &TenantHandler{svc: svc}
+}
+
+// GET /api/v1/tenant/me  â€“ returns the current tenant's settings including API key.
+// Available to any authenticated tenant user (not super-admin).
+func (h *TenantHandler) Me(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFromContext(r.Context())
+	if claims == nil || claims.TenantID == "" {
+		respondError(w, http.StatusForbidden, "not a tenant user")
+		return
+	}
+	t, err := h.svc.GetForOwner(r.Context(), claims.TenantID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respond(w, http.StatusOK, t)
 }
 
 // GET /api/v1/tenants

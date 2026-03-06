@@ -129,7 +129,7 @@ ON CONFLICT (id) DO NOTHING;
 -- Super-admin user  (password: admin123)
 INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active)
 VALUES
-    ('user-super-001', NULL, 'Super Admin', 'admin@newgen.dev',
+    ('user-super-001', NULL, 'Super Admin', 'admin@nexus.dev',
      '$2a$10$Ow.YEo17kozKkhRBqwt66.erzprXjunto.VYkYif0a9tWWEf5WvO6',
      'SUPER_ADMIN', TRUE)
 ON CONFLICT (id) DO NOTHING;
@@ -145,18 +145,3 @@ VALUES
      'TENANT_ADMIN', TRUE)
 ON CONFLICT (id) DO NOTHING;
 
--- Sample workflows
-INSERT INTO workflows (id, tenant_id, name, description, status, trigger)
-VALUES
-    ('wf-001', 'tenant-001', 'Sipariş Entegrasyonu', 'E-ticaret siparişlerini LOGO ERP''ye aktarır', 'ACTIVE', 'webhook'),
-    ('wf-002', 'tenant-001', 'Cari Kontrol',         'Sipariş öncesi müşteri bakiye kontrolü',       'ACTIVE', 'api'),
-    ('wf-003', 'tenant-002', 'Stok Senkronizasyonu', 'ERP stok verilerini platforma senkronize eder', 'DISABLED', 'schedule')
-ON CONFLICT (id) DO NOTHING;
-
--- Sample API endpoint (Cari Kontrol)
-INSERT INTO api_endpoints (id, tenant_id, name, slug, method, path, description, enabled, auth, category, test_mode)
-VALUES
-    ('ep-001', 'tenant-001', 'Cari Kontrol', 'cari-kontrol', 'POST', '/api/v1/cari-kontrol',
-     'Müşteri cari kodunu kontrol eder, LOGO ERP''de kayıtlı mı doğrular',
-     TRUE, 'API_KEY', 'ERP', TRUE)
-ON CONFLICT (id) DO NOTHING;

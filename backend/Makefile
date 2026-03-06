@@ -1,6 +1,6 @@
 .PHONY: run build clean tidy test
 
-BINARY := bin/newgen-server.exe
+BINARY := bin/nexus-server.exe
 MAIN   := ./cmd/server
 
 run:

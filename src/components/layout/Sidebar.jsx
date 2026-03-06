@@ -10,9 +10,8 @@ import {
   ChevronDown,
   LogOut,
   BarChart3,
-  GitBranch,
   List,
-  Globe,
+  Braces,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useAuthStore } from "../../store/authStore";
@@ -53,10 +52,8 @@ const tenantNav = [
     section: "Entegrasyon",
     items: [
       { to: "/tenant/logs", icon: Activity, label: "Entegrasyon Logları" },
-      { to: "/tenant/mappings", icon: Zap, label: "Mapping & Kurallar" },
       { to: "/tenant/workflows", icon: List, label: "Workflow Yönetimi" },
-      { to: "/tenant/workflows/builder", icon: GitBranch, label: "Workflow Builder" },
-      { to: "/tenant/api-endpoints", icon: Globe, label: "API Uçları" },
+      { to: "/tenant/modeller", icon: Braces, label: "Modeller" },
     ],
   },
   {
@@ -99,7 +96,7 @@ export default function Sidebar() {
           <Zap size={18} className="text-white" />
         </div>
         <div>
-          <p className="text-sm font-bold tracking-wide">NexusBridge</p>
+          <p className="text-sm font-bold tracking-wide">Nexus</p>
           <p className="text-[10px] text-white/40 uppercase tracking-widest">
             Integration Platform
           </p>

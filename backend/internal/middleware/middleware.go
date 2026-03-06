@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"github.com/newgen/backend/internal/service"
+	"github.com/nexus/backend/internal/service"
 )
 
-// ─── Context keys ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Context keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type contextKey string
 
 const claimsKey contextKey = "claims"
 
-// ─── CORS ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // CORS adds permissive cross-origin headers for the React dev server.
 // In production, restrict AllowedOrigins to your actual domain.
@@ -50,7 +50,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// ─── Logger ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Logger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Logger logs each request with method, path, status and duration.
 func Logger(next http.Handler) http.Handler {
@@ -78,7 +78,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// ─── JWT Auth ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ JWT Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Auth validates the Bearer JWT and stores the claims in the request context.
 func Auth(jwtSvc *service.JWTService) func(http.Handler) http.Handler {
@@ -133,11 +133,11 @@ func ClaimsFromContext(ctx context.Context) *service.Claims {
 	return c
 }
 
-// ─── API-Key auth (for external callers of Cari Kontrol etc.) ────────────────
+// â”€â”€â”€ API-Key auth (for external callers of webhooks etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// APIKeyAuth validates X-API-Key header against a fixed set of keys.
-// In production, look the key up in the database instead.
-func APIKeyAuth(validKeys map[string]string) func(http.Handler) http.Handler {
+// APIKeyAuth validates X-API-Key header using a resolver function.
+// The resolver looks up the tenantID for a given key (DB or env-backed).
+func APIKeyAuth(resolver func(ctx context.Context, key string) (tenantID string, err error)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.Header.Get("X-API-Key")
@@ -145,8 +145,8 @@ func APIKeyAuth(validKeys map[string]string) func(http.Handler) http.Handler {
 				http.Error(w, `{"error":"X-API-Key header required"}`, http.StatusUnauthorized)
 				return
 			}
-			tenantID, ok := validKeys[key]
-			if !ok {
+			tenantID, err := resolver(r.Context(), key)
+			if err != nil {
 				http.Error(w, `{"error":"invalid API key"}`, http.StatusUnauthorized)
 				return
 			}

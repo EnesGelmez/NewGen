@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: NewGen Integration Platform API
+  title: Nexus Integration Platform API
   description: |
-    **NewGen** is a multi-tenant B2B SaaS integration platform that bridges
+    **Nexus** is a multi-tenant B2B SaaS integration platform that bridges
     on-premise LOGO ERP installations with e-commerce and B2B systems via a
     lightweight local Agent software.
 
@@ -18,14 +18,14 @@ info:
     ## Seed accounts (development)
     | Email | Password | Role |
     |-------|----------|------|
-    | admin@newgen.dev | admin123 | SUPER_ADMIN |
+    | admin@nexus.dev | admin123 | SUPER_ADMIN |
     | admin@arcelik.com | admin123 | TENANT_ADMIN |
     | admin@beko.com | admin123 | TENANT_ADMIN |
 
   version: 1.0.0
   contact:
-    name: NewGen Platform
-    email: platform@newgen.dev
+    name: Nexus Platform
+    email: platform@nexus.dev
 
 servers:
   - url: http://localhost:8080

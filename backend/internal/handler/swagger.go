@@ -4,13 +4,13 @@ import (
 	"net/http"
 	"strings"
 
-	ngapi "github.com/newgen/backend/api"
+	ngapi "github.com/nexus/backend/api"
 )
 
 // SwaggerHandler serves:
 //
-//	GET /swagger/          → Swagger UI HTML (CDN-hosted assets)
-//	GET /swagger/openapi.yaml → raw OpenAPI 3.0 spec
+//	GET /swagger/          â†’ Swagger UI HTML (CDN-hosted assets)
+//	GET /swagger/openapi.yaml â†’ raw OpenAPI 3.0 spec
 type SwaggerHandler struct{}
 
 func NewSwaggerHandler() *SwaggerHandler { return &SwaggerHandler{} }
@@ -49,7 +49,7 @@ func (h *SwaggerHandler) serveUI(w http.ResponseWriter, r *http.Request) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NewGen API – Swagger UI</title>
+  <title>Nexus API – Swagger UI</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>
     body { margin: 0; background: #fafafa; }

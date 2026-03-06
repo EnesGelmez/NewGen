@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useWorkflowStore } from "../../store/workflowStore";
+import { useAuthStore } from "../../store/authStore";
 import {
   GitBranch, Plus, Play, Pause, Trash2, BarChart3,
   CheckCircle2, XCircle, Clock, Activity, TrendingUp,
   TrendingDown, Zap, AlertTriangle, ChevronRight, Settings,
   RefreshCw, Eye,
 } from "lucide-react";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 
 /* ─── helpers ─── */
@@ -102,9 +105,37 @@ function DeleteModal({ workflow, onConfirm, onCancel }) {
 }
 
 /* ─── Stats Detail Modal ─── */
-function StatsModal({ workflow, onClose }) {
-  const rate = successRate(workflow.stats);
-  const s = workflow.stats;
+function StatsModal({ workflowId, workflowBase, onClose }) {
+  const { authHeader } = useAuthStore();
+  const [wf, setWf] = useState(workflowBase);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/workflows/${workflowId}`, {
+          headers: { ...authHeader() },
+        });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setWf({
+            ...workflowBase,
+            lastRun: data.lastRunAt ?? null,
+            stats: data.stats ?? workflowBase.stats,
+          });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [workflowId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const s = wf.stats;
+  const rate = successRate(s);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -116,7 +147,7 @@ function StatsModal({ workflow, onClose }) {
               <BarChart3 size={15} />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-foreground">{workflow.name}</h3>
+              <h3 className="text-sm font-semibold text-foreground">{wf.name}</h3>
               <p className="text-xs text-muted-foreground">İstatistikler</p>
             </div>
           </div>
@@ -125,6 +156,11 @@ function StatsModal({ workflow, onClose }) {
           </button>
         </div>
 
+        {loading ? (
+          <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+            <RefreshCw size={16} className="animate-spin mr-2" /> Yükleniyor…
+          </div>
+        ) : (
         <div className="p-5 space-y-4">
           {/* Genel istatistikler */}
           <div className="grid grid-cols-3 gap-3">
@@ -186,22 +222,23 @@ function StatsModal({ workflow, onClose }) {
           <div className="rounded-xl bg-muted/30 border border-border p-3 grid grid-cols-2 gap-3 text-xs">
             <div>
               <p className="text-[10px] text-muted-foreground mb-0.5">Tetikleyici</p>
-              <p className="font-medium text-foreground truncate">{workflow.trigger}</p>
+              <p className="font-medium text-foreground truncate">{wf.trigger}</p>
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground mb-0.5">Bileşen Sayısı</p>
-              <p className="font-medium text-foreground">{workflow.nodeCount} bileşen · {workflow.connectionCount} bağlantı</p>
+              <p className="font-medium text-foreground">{wf.nodeCount} bileşen · {wf.connectionCount} bağlantı</p>
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground mb-0.5">Oluşturulma</p>
-              <p className="font-medium text-foreground">{workflow.createdAt}</p>
+              <p className="font-medium text-foreground">{wf.createdAt}</p>
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground mb-0.5">Son Çalışma</p>
-              <p className="font-medium text-foreground">{formatDate(workflow.lastRun)}</p>
+              <p className="font-medium text-foreground">{formatDate(wf.lastRun)}</p>
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -211,11 +248,34 @@ function StatsModal({ workflow, onClose }) {
 export default function WorkflowListPage() {
   const navigate = useNavigate();
   const { workflows, createWorkflow, toggleEnabled, deleteWorkflow, fetchWorkflows } = useWorkflowStore();
+  const { authHeader } = useAuthStore();
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [statsTarget, setStatsTarget] = useState(null);
+  const [tenantStats, setTenantStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
 
-  /* Load workflows from backend on mount */
-  useEffect(() => { fetchWorkflows(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const fetchTenantStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/workflows/stats`, {
+        headers: { ...authHeader() },
+      });
+      if (res.ok) setTenantStats(await res.json());
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [authHeader]);
+
+  const handleRefresh = () => {
+    fetchWorkflows();
+    fetchTenantStats();
+  };
+
+  /* Load on mount */
+  useEffect(() => {
+    fetchWorkflows();
+    fetchTenantStats();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Delete */
   const confirmDelete = () => {
@@ -230,10 +290,11 @@ export default function WorkflowListPage() {
   };
 
   /* Summary totals */
-  const totalRuns    = workflows.reduce((s, w) => s + w.stats.totalRuns, 0);
-  const totalFailed  = workflows.reduce((s, w) => s + w.stats.failedRuns, 0);
-  const activeCount  = workflows.filter((w) => w.enabled).length;
-  const todayRuns    = workflows.reduce((s, w) => s + w.stats.lastDayRuns, 0);
+  const activeCount = workflows.filter((w) => w.enabled).length;
+  const totalRuns   = workflows.reduce((s, w) => s + w.stats.totalRuns, 0);
+  const totalFailed = workflows.reduce((s, w) => s + w.stats.failedRuns, 0);
+
+  const ts = tenantStats;  // 24-hour stats from API
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
@@ -246,21 +307,30 @@ export default function WorkflowListPage() {
             Tüm entegrasyon iş akışlarını izleyin, etkinleştirin ve yönetin
           </p>
         </div>
-        <button
-          onClick={handleNewWorkflow}
-          className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
-        >
-          <Plus size={15} />
-          Yeni Workflow
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            <RefreshCw size={13} className={statsLoading ? "animate-spin" : ""} />
+            Yenile
+          </button>
+          <button
+            onClick={handleNewWorkflow}
+            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
+          >
+            <Plus size={15} />
+            Yeni Workflow
+          </button>
+        </div>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — 24h stats from API */}
       <div className="grid grid-cols-4 gap-4">
-        <SummaryCard icon={GitBranch}     label="Toplam Workflow"    value={workflows.length}           sub={`${activeCount} aktif`}             color="blue"    />
-        <SummaryCard icon={Activity}      label="Toplam Çalışma"     value={formatNum(totalRuns)}       sub="tüm zamanlar"                       color="emerald" />
-        <SummaryCard icon={Zap}           label="Bugün Çalışma"      value={todayRuns}                  sub="son 24 saat"                        color="blue"    />
-        <SummaryCard icon={AlertTriangle} label="Toplam Hata"        value={totalFailed}                sub={`${workflows.filter(w=>w.stats.failedRuns>0).length} workflow'da`} color="rose" />
+        <SummaryCard icon={GitBranch}     label="Toplam Workflow"    value={workflows.length}              sub={`${activeCount} aktif`}                                         color="blue"    />
+        <SummaryCard icon={Activity}      label="24s Çalışma"        value={statsLoading ? "…" : (ts?.total ?? 0)}         sub="son 24 saat"                                color="emerald" />
+        <SummaryCard icon={CheckCircle2}  label="24s Başarılı"       value={statsLoading ? "…" : (ts?.successful ?? 0)}    sub={ts && ts.total > 0 ? `%${((ts.successful/ts.total)*100).toFixed(0)} oran` : null} color="blue" />
+        <SummaryCard icon={AlertTriangle} label="24s Hatalı"         value={statsLoading ? "…" : (ts?.failed ?? 0)}        sub={totalFailed > 0 ? `toplam ${totalFailed.toLocaleString("tr-TR")} hata` : "tüm zamanlar"} color="rose" />
       </div>
 
       {/* Workflow cards */}
@@ -398,7 +468,8 @@ export default function WorkflowListPage() {
       )}
       {statsTarget && (
         <StatsModal
-          workflow={statsTarget}
+          workflowId={statsTarget.id}
+          workflowBase={statsTarget}
           onClose={() => setStatsTarget(null)}
         />
       )}

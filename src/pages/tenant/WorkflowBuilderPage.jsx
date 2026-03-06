@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  X, Plus, Save, RotateCcw, Link2, Layers, ChevronDown,
+  X, Plus, Save, RotateCcw, Layers, ChevronDown,
   CheckCircle2, Zap, BookOpen, ChevronRight, Copy, Check,
   Info, Server, ArrowLeft,
 } from "lucide-react";
@@ -233,8 +233,204 @@ function ConfigField({ field, value, onChange }) {
 }
 
 
+/* -------- JSON path utilities -------- */
+function walkJsonPaths(v, prefix) {
+  const paths = [];
+  if (Array.isArray(v)) {
+    const arrPath = prefix + "[]";
+    paths.push(arrPath);
+    if (v.length > 0 && v[0] !== null && typeof v[0] === "object") {
+      paths.push(...walkJsonPaths(v[0], arrPath));
+    }
+    return paths;
+  }
+  if (typeof v !== "object" || v === null) return prefix ? [prefix] : [];
+  for (const [k, val] of Object.entries(v)) {
+    const p = prefix ? `${prefix}.${k}` : k;
+    if (Array.isArray(val)) {
+      paths.push(p + "[]");
+      if (val.length > 0 && val[0] !== null && typeof val[0] === "object") {
+        paths.push(...walkJsonPaths(val[0], p + "[]"));
+      }
+    } else if (val !== null && typeof val === "object") {
+      paths.push(p);
+      paths.push(...walkJsonPaths(val, p));
+    } else {
+      paths.push(p);
+    }
+  }
+  return paths;
+}
+
+function extractJsonPaths(jsonStr) {
+  try {
+    const obj = JSON.parse(jsonStr);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return [];
+    return walkJsonPaths(obj, "");
+  } catch { return []; }
+}
+
+function flattenModelFields(fields, prefix) {
+  if (prefix === undefined) prefix = "";
+  const out = [];
+  for (const f of (fields ?? [])) {
+    if (!f.name) continue;
+    const p = prefix ? `${prefix}.${f.name}` : f.name;
+    out.push({ path: p, type: f.type, required: !!f.required });
+    if (f.type === "object" && f.fields?.length) {
+      out.push(...flattenModelFields(f.fields, p));
+    } else if (f.type === "array" && f.itemType === "object" && f.fields?.length) {
+      out.push(...flattenModelFields(f.fields, p + "[]"));
+    }
+  }
+  return out;
+}
+
+function loadLocalModels() {
+  try { return JSON.parse(localStorage.getItem("ng_models_v1") ?? "[]"); } catch { return []; }
+}
+
+function getUpstreamJsonPaths(nodeId, nodes, connections) {
+  const upIds = connections.filter((c) => c.toId === nodeId).map((c) => c.fromId);
+  for (const uid of upIds) {
+    const upNode = nodes.find((n) => n.id === uid);
+    if (upNode?.type === "json_schema") {
+      return extractJsonPaths(upNode.config?.sampleJson ?? "");
+    }
+  }
+  return [];
+}
+
+/* -------- JsonSchemaPanel -------- */
+function JsonSchemaPanel({ node, onConfigChange }) {
+  const raw = node.config?.sampleJson ?? "";
+  const paths = extractJsonPaths(raw);
+  const parseErr = raw.trim() && paths.length === 0 ? "Geçersiz JSON" : null;
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-[11px] font-medium text-muted-foreground block mb-1">Örnek JSON Yapısı</label>
+        <textarea
+          value={raw}
+          onChange={(e) => onConfigChange("sampleJson", e.target.value)}
+          rows={9}
+          spellCheck={false}
+          className="w-full resize-y rounded-lg border border-input bg-background px-2.5 py-2 text-[10px] font-mono focus:outline-none focus:ring-2 focus:ring-ring leading-relaxed"
+          placeholder={'{\n  "bankaAdi": "...",\n  "islemler": [{\n    "tutar": 0\n  }]\n}'}
+        />
+        {parseErr && <p className="text-[10px] text-red-500 mt-1">⚠ {parseErr}</p>}
+      </div>
+      {paths.length > 0 && (
+        <div>
+          <p className="text-[11px] font-medium text-muted-foreground mb-1.5">
+            Çıkarılan Alan Yolları{" "}
+            <span className="font-normal text-muted-foreground/60">({paths.length})</span>
+          </p>
+          <div className="rounded-lg border border-border bg-slate-900 px-3 py-2.5 space-y-0.5 max-h-52 overflow-y-auto">
+            {paths.map((p) => (
+              <p key={p} className="font-mono text-[10px] text-emerald-400 leading-relaxed">{p}</p>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
+            Bu node&rsquo;u <strong>Model Eşleştirme</strong>&rsquo;ye bağladığında kaynak alanlar otomatik gelir.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------- ModelMappingPanel -------- */
+function ModelMappingPanel({ node, nodes, connections, onConfigChange }) {
+  const models = loadLocalModels();
+  const sourcePaths = getUpstreamJsonPaths(node.id, nodes, connections);
+  const targetModelId = node.config?.targetModelId ?? "";
+  const mappings = node.config?.mappings ?? {};
+  const targetModel = models.find((m) => m.id === targetModelId);
+  const modelFields = targetModel ? flattenModelFields(targetModel.fields) : [];
+
+  const setMapping = (fieldPath, src) =>
+    onConfigChange("mappings", { ...mappings, [fieldPath]: src });
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-[11px] font-medium text-muted-foreground block mb-1">Hedef Model</label>
+        <select
+          value={targetModelId}
+          onChange={(e) => onConfigChange("targetModelId", e.target.value)}
+          className="w-full h-8 rounded-lg border border-input bg-background px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">Model seçin…</option>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+        {models.length === 0 && (
+          <p className="text-[10px] text-amber-600 mt-1">
+            Önce <strong>Modeller</strong> sayfasından model tanımlayın.
+          </p>
+        )}
+      </div>
+
+      {sourcePaths.length === 0 && targetModel && (
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-2.5 text-[10px] text-blue-700 leading-relaxed">
+          Kaynak alanlar için bir <strong>Gelen JSON Yapısı</strong> node&rsquo;unu bu node&rsquo;a bağlayın.
+          Bağlantı olmadan alan yolunu elle yazabilirsiniz.
+        </div>
+      )}
+
+      {targetModel && (
+        <div>
+          <p className="text-[11px] font-medium text-muted-foreground mb-1.5">
+            Alan Eşleştirmeleri
+            {modelFields.length > 0 && (
+              <span className="font-normal text-muted-foreground/60 ml-1">({modelFields.length})</span>
+            )}
+          </p>
+          {modelFields.length === 0 ? (
+            <p className="text-[10px] text-muted-foreground/60">Seçili modelde alan yok.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {modelFields.map((field) => (
+                <div key={field.path} className="rounded-lg border border-border bg-slate-50 p-2">
+                  <div className="flex items-center gap-1 mb-1">
+                    <span className="font-mono text-[10px] text-foreground flex-1 truncate">{field.path}</span>
+                    {field.required && <span className="text-[9px] text-red-500 flex-shrink-0">*</span>}
+                    <span className="text-[9px] text-muted-foreground flex-shrink-0">{field.type}</span>
+                  </div>
+                  {sourcePaths.length > 0 ? (
+                    <select
+                      value={mappings[field.path] ?? ""}
+                      onChange={(e) => setMapping(field.path, e.target.value)}
+                      className="w-full h-7 rounded border border-input bg-white px-1.5 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">(eşleme yok)</option>
+                      {sourcePaths.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={mappings[field.path] ?? ""}
+                      onChange={(e) => setMapping(field.path, e.target.value)}
+                      placeholder="kaynak.yolu"
+                      className="w-full h-7 rounded border border-input bg-white px-1.5 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 /* -------- CanvasNode -------- */
-function CanvasNode({ node, isSelected, connectMode, pendingFrom, connections, onNodeClick, onDelete, onStartDrag, onHandleClick }) {
+function CanvasNode({ node, isSelected, draggingWire, connections, onNodeClick, onDelete, onStartDrag, onStartWire, onCompleteWire }) {
   const def = NODE_TYPES[node.type];
   if (!def) return null;
   const colors = COLOR_MAP[def.colorKey];
@@ -250,22 +446,23 @@ function CanvasNode({ node, isSelected, connectMode, pendingFrom, connections, o
     connections.filter((c) => c.toId === node.id).map((c) => c.toHandle ?? "input")
   );
   const hasUnconnectedRequired = inputHandles.some((h) => h.required && !connectedInputKeys.has(h.key));
-  const isSource = pendingFrom?.nodeId === node.id;
+  const isWireSource = draggingWire?.fromNodeId === node.id;
 
-  const borderCls = hasUnconnectedRequired && !isSource
+  const borderCls = hasUnconnectedRequired && !isWireSource
     ? "border-red-300 ring-2 ring-red-100"
-    : isSource
+    : isWireSource
     ? "border-primary ring-4 ring-primary/25 shadow-xl"
-    : isSelected && !connectMode
+    : isSelected
     ? "border-primary ring-2 ring-primary/15 shadow-lg"
     : `${colors.nodeBorder} hover:shadow-lg`;
 
   return (
     <div
       style={{ left: node.x, top: node.y, width: NODE_W, height: nodeH, position: "absolute" }}
-      className={`rounded-xl border-2 bg-white shadow-md select-none transition-all ${borderCls} ${connectMode ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing"}`}
-      onMouseDown={(e) => { if (connectMode) return; e.stopPropagation(); onStartDrag(e, node.id); }}
+      className={`rounded-xl border-2 bg-white shadow-md select-none transition-all ${borderCls} cursor-grab active:cursor-grabbing`}
+      onMouseDown={(e) => { e.stopPropagation(); onStartDrag(e, node.id); }}
       onClick={(e) => { e.stopPropagation(); onNodeClick(node.id); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(node.id); }}
     >
       {/* Header */}
       <div style={{ height: HEADER_H }} className={`flex items-center gap-2 px-3 rounded-t-[10px] ${colors.headerBg}`}>
@@ -285,7 +482,7 @@ function CanvasNode({ node, isSelected, connectMode, pendingFrom, connections, o
           const inp = inputHandles[rowIdx];
           const out = outputHandles[rowIdx];
           const inpConnected = inp && connectedInputKeys.has(inp.key);
-          const isActiveOut  = isSource && pendingFrom?.handle === out?.key;
+          const isActiveOut  = isWireSource && draggingWire?.fromHandle === out?.key;
 
           return (
             <div key={rowIdx} style={{ height: HANDLE_ROW_H }} className="relative flex items-center">
@@ -293,10 +490,10 @@ function CanvasNode({ node, isSelected, connectMode, pendingFrom, connections, o
               {inp && (
                 <div
                   style={{ position: "absolute", left: -6, top: "50%", transform: "translateY(-50%)" }}
-                  className={`w-3 h-3 rounded-full border-2 border-white shadow-sm z-10 transition-all
+                  className={`w-3 h-3 rounded-full border-2 border-white shadow-sm z-10 transition-all cursor-crosshair hover:scale-125
                     ${inpConnected ? colors.iconBg : inp.required ? "bg-red-400 ring-2 ring-red-200" : "bg-slate-300"}
-                    ${connectMode ? "hover:scale-125 cursor-crosshair" : ""}`}
-                  onClick={(e) => { e.stopPropagation(); onHandleClick("input", node.id, inp.key); }}
+                    ${draggingWire && !isWireSource ? "scale-110 ring-2 ring-primary/40" : ""}`}
+                  onMouseUp={(e) => { e.stopPropagation(); if (draggingWire) onCompleteWire(node.id, inp.key); }}
                 />
               )}
 
@@ -324,10 +521,9 @@ function CanvasNode({ node, isSelected, connectMode, pendingFrom, connections, o
               {out && (
                 <div
                   style={{ position: "absolute", right: -6, top: "50%", transform: "translateY(-50%)" }}
-                  className={`w-3 h-3 rounded-full border-2 border-white shadow-sm z-10 transition-all
-                    ${isActiveOut ? "bg-primary ring-2 ring-primary/30 scale-125" : colors.iconBg}
-                    ${connectMode ? "hover:scale-125 cursor-crosshair" : ""}`}
-                  onClick={(e) => { e.stopPropagation(); onHandleClick("output", node.id, out.key); }}
+                  className={`w-3 h-3 rounded-full border-2 border-white shadow-sm z-10 transition-all cursor-crosshair hover:scale-125
+                    ${isActiveOut ? "bg-primary ring-2 ring-primary/30 scale-125" : colors.iconBg}`}
+                  onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onStartWire(e, node.id, out?.key ?? "output", rowIdx); }}
                 />
               )}
             </div>
@@ -335,18 +531,13 @@ function CanvasNode({ node, isSelected, connectMode, pendingFrom, connections, o
         })}
       </div>
 
-      {/* Tooltip when this node is active source */}
-      {isSource && (
-        <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-primary px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg pointer-events-none">
-          {pendingFrom?.handle ? `[${pendingFrom.handle}] -> giriş noktasına tıkla` : "Çıkış noktasına tıkla ->"}
-        </div>
-      )}
+
     </div>
   );
 }
 
 /* -------- SVG Connection Lines -------- */
-function ConnectionLines({ nodes, connections, onDeleteConnection }) {
+function ConnectionLines({ nodes, connections, onDeleteConnection, draggingWire }) {
   const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
 
   return (
@@ -397,6 +588,12 @@ function ConnectionLines({ nodes, connections, onDeleteConnection }) {
           </g>
         );
       })}
+      {draggingWire && (() => {
+        const dx = draggingWire.mouseX - draggingWire.x1;
+        const cp = Math.abs(dx) * 0.5 + 20;
+        const d = `M ${draggingWire.x1} ${draggingWire.y1} C ${draggingWire.x1 + cp} ${draggingWire.y1}, ${draggingWire.mouseX - cp} ${draggingWire.mouseY}, ${draggingWire.mouseX} ${draggingWire.mouseY}`;
+        return <path key="live" d={d} fill="none" stroke="#6366f1" strokeWidth={2} strokeDasharray="6 3" strokeOpacity={0.9} className="pointer-events-none" />;
+      })()}
     </svg>
   );
 }
@@ -567,8 +764,7 @@ export default function WorkflowBuilderPage() {
   const [nodes, setNodes] = useState([]);
   const [connections, setConnections] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
-  const [connectMode, setConnectMode] = useState(false);
-  const [pendingFrom, setPendingFrom] = useState(null); // { nodeId, handle } | null
+  const [draggingWire, setDraggingWire] = useState(null);
   const [workflowName, setWorkflowName] = useState("Yeni Workflow");
   const [saved, setSaved] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
@@ -585,7 +781,7 @@ export default function WorkflowBuilderPage() {
       setWorkflowName(wf.name);
       setNodes(wf.nodes ?? []);
       setConnections(wf.connections ?? []);
-      setSelectedNodeId(null); setPendingFrom(null); setConnectMode(false);
+      setSelectedNodeId(null); setDraggingWire(null);
       return;
     }
     // Store empty (direct URL access) – fetch all and reload
@@ -597,18 +793,18 @@ export default function WorkflowBuilderPage() {
       setConnections(reloaded.connections ?? []);
     });
     setSelectedNodeId(null);
-    setPendingFrom(null);
-    setConnectMode(false);
+    setDraggingWire(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflowId]);
 
-  const canvasRef  = useRef(null);
+  const canvasRef   = useRef(null);
   const draggingRef = useRef(null);
+  const panRef      = useRef(null);
 
   /* Keyboard shortcuts */
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === "Escape") { setConnectMode(false); setPendingFrom(null); }
+      if (e.key === "Escape") setDraggingWire(null);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -630,11 +826,13 @@ export default function WorkflowBuilderPage() {
     const nh  = getNodeHeight(def);
     const x = Math.max(0, e.clientX - rect.left - NODE_W / 2);
     const y = Math.max(0, e.clientY - rect.top  - nh / 2);
-    const newNode = { id: `n-${Date.now()}`, type: nodeType, x, y, config: {} };
+    const defaultConfig = {};
+    (def.configSchema || []).forEach((f) => {
+      if (f.defaultValue !== undefined && f.key !== "__info__") defaultConfig[f.key] = f.defaultValue;
+    });
+    const newNode = { id: `n-${Date.now()}`, type: nodeType, x, y, config: defaultConfig };
     setNodes((prev) => [...prev, newNode]);
     setSelectedNodeId(newNode.id);
-    setConnectMode(false);
-    setPendingFrom(null);
   };
 
   /* -- Node drag (move existing node) -- */
@@ -666,44 +864,60 @@ export default function WorkflowBuilderPage() {
     window.addEventListener("mouseup", onMouseUp);
   }, [nodes]);
 
-  /* -- Node body click: select (connect mode: ignore body clicks) -- */
+  /* -- Node body click: select -- */
   const handleNodeClick = useCallback((nodeId) => {
-    if (!connectMode) setSelectedNodeId(nodeId);
-  }, [connectMode]);
+    setSelectedNodeId(nodeId);
+  }, []);
 
-  /* -- Handle dot click: drive connections -- */
-  const handleHandleClick = useCallback((type, nodeId, handleKey) => {
-    if (type === "output") {
-      // Clicking an output handle starts (or cancels) a pending connection
-      if (!connectMode) setConnectMode(true);
-      setPendingFrom((prev) =>
-        prev?.nodeId === nodeId && prev?.handle === handleKey ? null : { nodeId, handle: handleKey }
-      );
-    } else if (type === "input") {
-      // Clicking an input handle completes the connection
-      if (!pendingFrom) return;
-      if (pendingFrom.nodeId === nodeId) { setPendingFrom(null); return; }
-      const alreadyExists = connections.some(
-        (c) => c.fromId === pendingFrom.nodeId && c.fromHandle === pendingFrom.handle
-             && c.toId === nodeId              && c.toHandle   === handleKey
-      );
-      if (!alreadyExists) {
-        setConnections((prev) => [
-          ...prev,
-          { id: `c-${Date.now()}`, fromId: pendingFrom.nodeId, fromHandle: pendingFrom.handle, toId: nodeId, toHandle: handleKey },
-        ]);
-      }
-      setPendingFrom(null);
-      setConnectMode(false);
-    }
-  }, [connectMode, pendingFrom, connections]);
+  /* -- Start wire drag from output handle -- */
+  const handleStartWire = useCallback((e, nodeId, handleKey, rowIdx) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x1 = node.x + NODE_W + 6;
+    const y1 = node.y + handleRelY(rowIdx);
+    const mouseX = e.clientX - rect.left + canvasRef.current.scrollLeft;
+    const mouseY = e.clientY - rect.top  + canvasRef.current.scrollTop;
+    setDraggingWire({ fromNodeId: nodeId, fromHandle: handleKey, x1, y1, mouseX, mouseY });
+  }, [nodes]);
+
+  /* -- Complete wire drag on input handle -- */
+  const handleCompleteWire = useCallback((toNodeId, toHandle) => {
+    setDraggingWire((prev) => {
+      if (!prev || prev.fromNodeId === toNodeId) return null;
+      setConnections((conns) => {
+        const exists = conns.some(
+          (c) => c.fromId === prev.fromNodeId && c.fromHandle === prev.fromHandle
+               && c.toId === toNodeId         && c.toHandle   === toHandle
+        );
+        if (exists) return conns;
+        return [...conns, { id: `c-${Date.now()}`, fromId: prev.fromNodeId, fromHandle: prev.fromHandle, toId: toNodeId, toHandle }];
+      });
+      return null;
+    });
+  }, []);
+
+  /* -- Global listeners: update live wire mouse pos + cancel on release -- */
+  useEffect(() => {
+    const onMove = (e) => {
+      setDraggingWire((prev) => {
+        if (!prev) return null;
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return prev;
+        return { ...prev, mouseX: e.clientX - rect.left + (canvasRef.current?.scrollLeft ?? 0), mouseY: e.clientY - rect.top + (canvasRef.current?.scrollTop ?? 0) };
+      });
+    };
+    const onUp = () => setDraggingWire(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
 
   /* -- Delete node + its connections -- */
   const handleDeleteNode = (nodeId) => {
     setNodes((prev) => prev.filter((n) => n.id !== nodeId));
     setConnections((prev) => prev.filter((c) => c.fromId !== nodeId && c.toId !== nodeId));
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
-    if (pendingFrom?.nodeId === nodeId) setPendingFrom(null);
   };
 
   /* -- Delete connection -- */
@@ -725,12 +939,11 @@ export default function WorkflowBuilderPage() {
     setConnections(tpl.connections.map((c) => ({ ...c })));
     setWorkflowName(tpl.name);
     setSelectedNodeId(null);
-    setPendingFrom(null);
   };
 
   const handleClear = () => {
     setNodes([]); setConnections([]);
-    setSelectedNodeId(null); setPendingFrom(null);
+    setSelectedNodeId(null);
   };
 
   const handleSave = async () => {
@@ -833,19 +1046,6 @@ export default function WorkflowBuilderPage() {
           </button>
 
           {/* Connect mode toggle */}
-          <button
-            onClick={() => { setConnectMode((m) => !m); setPendingFrom(null); }}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-              connectMode
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border text-muted-foreground hover:bg-muted/60"
-            }`}
-          >
-            <Link2 size={13} />
-            {connectMode
-              ? pendingFrom ? "Giriş seç..." : "Çıkış seç..."
-              : "Bağla"}
-          </button>
 
           <button
             onClick={handleClear}
@@ -868,14 +1068,29 @@ export default function WorkflowBuilderPage() {
             ref={canvasRef}
             onDrop={handleCanvasDrop}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-            onClick={() => { if (!connectMode) { setSelectedNodeId(null); } else { setPendingFrom(null); } }}
+            onClick={() => setSelectedNodeId(null)}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                panRef.current = { startX: e.clientX, startY: e.clientY, scrollLeft: canvasRef.current.scrollLeft, scrollTop: canvasRef.current.scrollTop };
+              }
+            }}
+            onMouseMove={(e) => {
+              if (panRef.current) {
+                canvasRef.current.scrollLeft = panRef.current.scrollLeft - (e.clientX - panRef.current.startX);
+                canvasRef.current.scrollTop  = panRef.current.scrollTop  - (e.clientY - panRef.current.startY);
+              }
+            }}
+            onMouseUp={(e) => { if (e.button === 1) panRef.current = null; }}
+            onMouseLeave={() => { panRef.current = null; }}
             className="flex-1 relative overflow-auto bg-[radial-gradient(circle,_#e2e8f0_1px,_transparent_1px)] bg-[length:24px_24px]"
-            style={{ minWidth: 900, minHeight: 500, cursor: connectMode ? "crosshair" : "default" }}
+            style={{ minWidth: 900, minHeight: 500, cursor: draggingWire ? "crosshair" : "default" }}
           >
             <ConnectionLines
               nodes={nodes}
               connections={connections}
               onDeleteConnection={handleDeleteConnection}
+              draggingWire={draggingWire}
             />
 
             {/* Empty state */}
@@ -896,19 +1111,19 @@ export default function WorkflowBuilderPage() {
                 key={node.id}
                 node={node}
                 isSelected={selectedNodeId === node.id}
-                connectMode={connectMode}
-                pendingFrom={pendingFrom}
+                draggingWire={draggingWire}
                 connections={connections}
                 onNodeClick={handleNodeClick}
                 onDelete={handleDeleteNode}
                 onStartDrag={handleNodeDragStart}
-                onHandleClick={handleHandleClick}
+                onStartWire={handleStartWire}
+                onCompleteWire={handleCompleteWire}
               />
             ))}
           </div>
 
           {/* -- Right: Properties Panel -- */}
-          {selectedNode && selectedDef && !connectMode && (
+          {selectedNode && selectedDef && (
             <div className="w-64 flex-shrink-0 border-l border-border bg-white overflow-y-auto">
               {/* Panel header */}
               <div className={`flex items-center gap-2 px-4 py-3 ${COLOR_MAP[selectedDef.colorKey].headerBg}`}>
@@ -923,14 +1138,32 @@ export default function WorkflowBuilderPage() {
 
               {/* Config fields */}
               <div className="p-3 space-y-3">
-                {(selectedDef.configSchema || []).map((field) => (
-                  <ConfigField
-                    key={field.key}
-                    field={field}
-                    value={selectedNode.config?.[field.key]}
-                    onChange={(key, val) => handleConfigChange(selectedNode.id, key, val)}
+                {/* ── Custom panels for special node types ── */}
+                {selectedNode.type === "json_schema" && (
+                  <JsonSchemaPanel
+                    node={selectedNode}
+                    onConfigChange={(key, val) => handleConfigChange(selectedNode.id, key, val)}
                   />
-                ))}
+                )}
+                {selectedNode.type === "model_mapping" && (
+                  <ModelMappingPanel
+                    node={selectedNode}
+                    nodes={nodes}
+                    connections={connections}
+                    onConfigChange={(key, val) => handleConfigChange(selectedNode.id, key, val)}
+                  />
+                )}
+                {/* ── Standard configSchema fields ── */}
+                {!["json_schema", "model_mapping"].includes(selectedNode.type) &&
+                  (selectedDef.configSchema || []).map((field) => (
+                    <ConfigField
+                      key={field.key}
+                      field={field}
+                      value={selectedNode.config?.[field.key]}
+                      onChange={(key, val) => handleConfigChange(selectedNode.id, key, val)}
+                    />
+                  ))
+                }
 
                 {/* ── Webhook URL (shown when trigger_http_json is saved) ── */}
                 {selectedNode.type === "trigger_http_json" && workflowId && (
@@ -1031,14 +1264,12 @@ export default function WorkflowBuilderPage() {
 
         {/* Status bar */}
         <div className="flex items-center gap-4 px-4 py-1.5 border-t border-border bg-muted/20 flex-shrink-0">
-            <span className="text-[10px] text-muted-foreground">{nodes.length} bileşen · {connections.length} bağlantı</span>
-          {connectMode && (
-            <span className="text-[10px] text-primary font-semibold">
-              ● Bağlantı modu{pendingFrom ? ` — giriş noktasına tıklayın` : ` — çıkış noktasına tıklayın`}
-            </span>
+          <span className="text-[10px] text-muted-foreground">{nodes.length} bileşen · {connections.length} bağlantı</span>
+          {draggingWire && (
+            <span className="text-[10px] text-primary font-semibold">● Bağlantı çiziliyor – giriş noktasına bırak</span>
           )}
           <div className="flex-1" />
-          <span className="text-[10px] text-muted-foreground">Bağlantı silmek için ok üzerine tıkla · Esc ile modu kapat</span>
+          <span className="text-[10px] text-muted-foreground">Çıkış • sürükle → giriş · Sağ tık: sil · Orta tuş: gezin · Ok üzeri: bağlantı sil</span>
         </div>
       </div>
 

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 )
 
 // ApiEndpointRepo is the PostgreSQL implementation of domain.ApiEndpointRepository.

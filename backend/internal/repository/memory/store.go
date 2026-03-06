@@ -10,16 +10,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func newID() string { return uuid.New().String() }
 func now() time.Time { return time.Now().UTC() }
 
-// ─── TenantRepo ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ TenantRepo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type TenantRepo struct {
 	mu   sync.RWMutex
@@ -37,7 +37,7 @@ func (r *TenantRepo) seed() {
 	t := now()
 	r.data[id] = &domain.Tenant{
 		ID:        id,
-		Name:      "Arçelik Pazarlama A.Ş.",
+		Name:      "ArÃ§elik Pazarlama A.Å.",
 		Subdomain: "arcelik",
 		Email:     "entegrasyon@arcelik.com",
 		Status:    domain.TenantStatusActive,
@@ -49,7 +49,7 @@ func (r *TenantRepo) seed() {
 	id2 := "tenant-002"
 	r.data[id2] = &domain.Tenant{
 		ID:        id2,
-		Name:      "Beko Elektronik A.Ş.",
+		Name:      "Beko Elektronik A.Å.",
 		Subdomain: "beko",
 		Email:     "it@beko.com",
 		Status:    domain.TenantStatusTrial,
@@ -93,6 +93,18 @@ func (r *TenantRepo) FindBySubdomain(_ context.Context, sub string) (*domain.Ten
 	return nil, fmt.Errorf("tenant with subdomain %q not found", sub)
 }
 
+func (r *TenantRepo) FindByAPIKey(_ context.Context, apiKey string) (*domain.Tenant, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, t := range r.data {
+		if t.APIKey == apiKey {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid API key")
+}
+
 func (r *TenantRepo) Create(_ context.Context, t *domain.Tenant) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -128,7 +140,7 @@ func (r *TenantRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// ─── UserRepo ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ UserRepo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type UserRepo struct {
 	mu   sync.RWMutex
@@ -146,8 +158,8 @@ func (r *UserRepo) seed() {
 	t := now()
 	r.data["user-001"] = &domain.User{
 		ID:           "user-001",
-		Name:         "Platform Yöneticisi",
-		Email:        "admin@newgen.io",
+		Name:         "Platform YÃ¶neticisi",
+		Email:        "admin@nexus.io",
 		PasswordHash: string(hash),
 		Role:         domain.UserRoleSuperAdmin,
 		IsActive:     true,
@@ -159,7 +171,7 @@ func (r *UserRepo) seed() {
 	r.data["user-002"] = &domain.User{
 		ID:           "user-002",
 		TenantID:     "tenant-001",
-		Name:         "Arçelik Entegrasyon",
+		Name:         "ArÃ§elik Entegrasyon",
 		Email:        "user@arcelik.com",
 		PasswordHash: string(hash2),
 		Role:         domain.UserRoleTenantAdmin,
@@ -240,7 +252,7 @@ func (r *UserRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// ─── WorkflowRepo ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ WorkflowRepo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type WorkflowRepo struct {
 	mu   sync.RWMutex
@@ -260,8 +272,8 @@ func (r *WorkflowRepo) seed() {
 		{
 			ID:          "wf-001",
 			TenantID:    "tenant-001",
-			Name:        "Cari Oluşturma (Tam Akış)",
-			Description: "HTTP JSON → Alan Eşleştirme → Doğrulama → e-Mükellef → Merge → Agent İsteği",
+			Name:        "Cari OluÅŸturma (Tam AkÄ±ÅŸ)",
+			Description: "HTTP JSON â†’ Alan EÅŸleÅŸtirme â†’ DoÄŸrulama â†’ e-MÃ¼kellef â†’ Merge â†’ Agent Ä°steÄŸi",
 			Status:      domain.WorkflowStatusActive,
 			Trigger:     "HTTP / JSON Tetikleyici",
 			Nodes:       []domain.WorkflowNode{},
@@ -277,10 +289,10 @@ func (r *WorkflowRepo) seed() {
 		{
 			ID:          "wf-002",
 			TenantID:    "tenant-001",
-			Name:        "E-Ticaret → Fatura",
-			Description: "Trendyol sipariş gelince fatura modeli oluştur, Agent'a ilet",
+			Name:        "E-Ticaret â†’ Fatura",
+			Description: "Trendyol sipariÅŸ gelince fatura modeli oluÅŸtur, Agent'a ilet",
 			Status:      domain.WorkflowStatusActive,
-			Trigger:     "E-Ticaret Siparişi",
+			Trigger:     "E-Ticaret SipariÅŸi",
 			Nodes:       []domain.WorkflowNode{},
 			Edges:       []domain.WorkflowEdge{},
 			Stats: domain.WorkflowStats{
@@ -294,8 +306,8 @@ func (r *WorkflowRepo) seed() {
 		{
 			ID:          "wf-003",
 			TenantID:    "tenant-001",
-			Name:        "Müşteri Email Kontrol",
-			Description: "Email adresi sisteme kayıtlı mı kontrol et, yeni ise cari oluştur",
+			Name:        "MÃ¼ÅŸteri Email Kontrol",
+			Description: "Email adresi sisteme kayÄ±tlÄ± mÄ± kontrol et, yeni ise cari oluÅŸtur",
 			Status:      domain.WorkflowStatusDisabled,
 			Trigger:     "HTTP / JSON Tetikleyici",
 			Nodes:       []domain.WorkflowNode{},
@@ -407,7 +419,7 @@ func (r *WorkflowRepo) IncrementStats(_ context.Context, workflowID string, succ
 	return nil
 }
 
-// ─── WorkflowRunRepo ──────────────────────────────────────────────────────────
+// â”€â”€â”€ WorkflowRunRepo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type WorkflowRunRepo struct {
 	mu   sync.RWMutex
@@ -472,7 +484,61 @@ func (r *WorkflowRunRepo) Update(_ context.Context, run *domain.WorkflowRun) err
 	return nil
 }
 
-// ─── ApiEndpointRepo ──────────────────────────────────────────────────────────
+func (r *WorkflowRunRepo) FindAllByTenant(_ context.Context, tenantID string, limit int) ([]domain.WorkflowRunSummary, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]domain.WorkflowRunSummary, 0)
+	for _, run := range r.data {
+		if run.TenantID != tenantID {
+			continue
+		}
+		out = append(out, domain.WorkflowRunSummary{
+			RunID:      run.ID,
+			WorkflowID: run.WorkflowID,
+			Status:     string(run.Status),
+			StartedAt:  run.StartedAt,
+			DurationMs: run.DurationMs,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (r *WorkflowRunRepo) StatsForTenant(_ context.Context, tenantID string, since time.Time) (*domain.TenantRunStats, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	stats := &domain.TenantRunStats{RecentRuns: []domain.WorkflowRunSummary{}}
+	for _, run := range r.data {
+		if run.TenantID != tenantID {
+			continue
+		}
+		if run.StartedAt.After(since) {
+			stats.Total++
+			if run.Status == domain.RunStatusSuccess {
+				stats.Successful++
+			} else if run.Status == domain.RunStatusFailed {
+				stats.Failed++
+			}
+		}
+		if len(stats.RecentRuns) < 10 {
+			stats.RecentRuns = append(stats.RecentRuns, domain.WorkflowRunSummary{
+				RunID:      run.ID,
+				WorkflowID: run.WorkflowID,
+				Status:     string(run.Status),
+				StartedAt:  run.StartedAt,
+				DurationMs: run.DurationMs,
+			})
+		}
+	}
+	return stats, nil
+}
+
+
 
 type ApiEndpointRepo struct {
 	mu   sync.RWMutex
@@ -496,8 +562,8 @@ func (r *ApiEndpointRepo) seed() {
 			Slug:     "cari-kontrol",
 			Method:   domain.MethodPOST,
 			Path:     "/api/v1/cari-kontrol",
-			Description: "Gelen cari kodunu/referansını alır ve Agent isteğine " +
-				"cariKontrolEdilecekMi bayrağını ekler. Test modunda her zaman true döner.",
+			Description: "Gelen cari kodunu/referansÄ±nÄ± alÄ±r ve Agent isteÄŸine " +
+				"cariKontrolEdilecekMi bayraÄŸÄ±nÄ± ekler. Test modunda her zaman true dÃ¶ner.",
 			Enabled:  true,
 			Auth:     domain.AuthAPIKey,
 			Category: "Cari",
@@ -546,7 +612,7 @@ func (r *ApiEndpointRepo) seed() {
 			Slug:        "agent-status",
 			Method:      domain.MethodGET,
 			Path:        "/api/v1/agent/status",
-			Description: "Bağlı yerel Agent'ın online/offline durumunu döner.",
+			Description: "BaÄŸlÄ± yerel Agent'Ä±n online/offline durumunu dÃ¶ner.",
 			Enabled:     true,
 			Auth:        domain.AuthBearer,
 			Category:    "Agent",
@@ -651,7 +717,7 @@ func (r *ApiEndpointRepo) IncrementCallCount(_ context.Context, id string) error
 	return nil
 }
 
-// ─── AgentRepo ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ AgentRepo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type AgentRepo struct {
 	mu   sync.RWMutex
@@ -700,7 +766,7 @@ func (r *AgentRepo) Upsert(_ context.Context, a *domain.Agent) error {
 	return nil
 }
 
-// ─── TenantAgentRepo ─────────────────────────────────────────────────────────
+// â”€â”€â”€ TenantAgentRepo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type TenantAgentRepo struct {
 	mu   sync.RWMutex

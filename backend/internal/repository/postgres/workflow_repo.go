@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/newgen/backend/internal/domain"
+	"github.com/nexus/backend/internal/domain"
 )
 
 // WorkflowRepo is the PostgreSQL implementation of domain.WorkflowRepository.
@@ -41,9 +41,30 @@ func scanWorkflow(row pgx.Row) (*domain.Workflow, error) {
 
 func (r *WorkflowRepo) FindAll(ctx context.Context, tenantID string) ([]domain.Workflow, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, tenant_id, name, description, status, trigger,
-		       nodes, edges, stats, created_at, updated_at, last_run_at
-		FROM workflows WHERE tenant_id=$1 ORDER BY created_at DESC`, tenantID)
+		SELECT w.id, w.tenant_id, w.name, w.description, w.status, w.trigger,
+		       w.nodes, w.edges, w.stats, w.created_at, w.updated_at, w.last_run_at,
+		       COALESCE(s.total, 0),
+		       COALESCE(s.success, 0),
+		       COALESCE(s.failed, 0),
+		       COALESCE(s.avg_ms, 0),
+		       COALESCE(s.day_runs, 0),
+		       COALESCE(s.day_success, 0),
+		       COALESCE(s.day_failed, 0)
+		FROM workflows w
+		LEFT JOIN (
+			SELECT workflow_id,
+			       COUNT(*)                                             AS total,
+			       COUNT(*) FILTER (WHERE status = 'SUCCESS')           AS success,
+			       COUNT(*) FILTER (WHERE status = 'FAILED')            AS failed,
+			       ROUND(AVG(duration_ms)::numeric, 2)                  AS avg_ms,
+			       COUNT(*) FILTER (WHERE started_at >= NOW() - INTERVAL '24 hours')                          AS day_runs,
+			       COUNT(*) FILTER (WHERE started_at >= NOW() - INTERVAL '24 hours' AND status = 'SUCCESS')   AS day_success,
+			       COUNT(*) FILTER (WHERE started_at >= NOW() - INTERVAL '24 hours' AND status = 'FAILED')    AS day_failed
+			FROM workflow_runs WHERE tenant_id = $1
+			GROUP BY workflow_id
+		) s ON w.id = s.workflow_id
+		WHERE w.tenant_id = $1
+		ORDER BY w.created_at DESC`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("workflows FindAll: %w", err)
 	}
@@ -53,31 +74,85 @@ func (r *WorkflowRepo) FindAll(ctx context.Context, tenantID string) ([]domain.W
 	for rows.Next() {
 		var w domain.Workflow
 		var nodesRaw, edgesRaw, statsRaw []byte
+		var total, success, failed, dayRuns, daySuccess, dayFailed int64
+		var avgMs float64
 		if err := rows.Scan(&w.ID, &w.TenantID, &w.Name, &w.Description, &w.Status,
 			&w.Trigger, &nodesRaw, &edgesRaw, &statsRaw,
-			&w.CreatedAt, &w.UpdatedAt, &w.LastRunAt); err != nil {
+			&w.CreatedAt, &w.UpdatedAt, &w.LastRunAt,
+			&total, &success, &failed, &avgMs,
+			&dayRuns, &daySuccess, &dayFailed); err != nil {
 			return nil, err
 		}
-		json.Unmarshal(nodesRaw, &w.Nodes)  //nolint:errcheck
-		json.Unmarshal(edgesRaw, &w.Edges)  //nolint:errcheck
-		json.Unmarshal(statsRaw, &w.Stats)  //nolint:errcheck
+		json.Unmarshal(nodesRaw, &w.Nodes) //nolint:errcheck
+		json.Unmarshal(edgesRaw, &w.Edges) //nolint:errcheck
+		json.Unmarshal(statsRaw, &w.Stats) //nolint:errcheck
 		if w.Nodes == nil { w.Nodes = []domain.WorkflowNode{} }
 		if w.Edges == nil { w.Edges = []domain.WorkflowEdge{} }
+		w.Stats.TotalRuns = total
+		w.Stats.SuccessRuns = success
+		w.Stats.FailedRuns = failed
+		w.Stats.AvgDurationMs = avgMs
+		w.Stats.LastDayRuns = dayRuns
+		w.Stats.LastDaySuccess = daySuccess
+		w.Stats.LastDayFailed = dayFailed
 		out = append(out, w)
 	}
 	return out, rows.Err()
 }
 
 func (r *WorkflowRepo) FindByID(ctx context.Context, id string) (*domain.Workflow, error) {
-	row := r.db.Pool.QueryRow(ctx, `
-		SELECT id, tenant_id, name, description, status, trigger,
-		       nodes, edges, stats, created_at, updated_at, last_run_at
-		FROM workflows WHERE id=$1`, id)
-	w, err := scanWorkflow(row)
+	var w domain.Workflow
+	var nodesRaw, edgesRaw, statsRaw []byte
+	var total, success, failed, dayRuns, daySuccess, dayFailed int64
+	var avgMs float64
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT w.id, w.tenant_id, w.name, w.description, w.status, w.trigger,
+		       w.nodes, w.edges, w.stats, w.created_at, w.updated_at, w.last_run_at,
+		       COALESCE(s.total, 0),
+		       COALESCE(s.success, 0),
+		       COALESCE(s.failed, 0),
+		       COALESCE(s.avg_ms, 0),
+		       COALESCE(s.day_runs, 0),
+		       COALESCE(s.day_success, 0),
+		       COALESCE(s.day_failed, 0)
+		FROM workflows w
+		LEFT JOIN (
+			SELECT workflow_id,
+			       COUNT(*)                                             AS total,
+			       COUNT(*) FILTER (WHERE status = 'SUCCESS')           AS success,
+			       COUNT(*) FILTER (WHERE status = 'FAILED')            AS failed,
+			       ROUND(AVG(duration_ms)::numeric, 2)                  AS avg_ms,
+			       COUNT(*) FILTER (WHERE started_at >= NOW() - INTERVAL '24 hours')                          AS day_runs,
+			       COUNT(*) FILTER (WHERE started_at >= NOW() - INTERVAL '24 hours' AND status = 'SUCCESS')   AS day_success,
+			       COUNT(*) FILTER (WHERE started_at >= NOW() - INTERVAL '24 hours' AND status = 'FAILED')    AS day_failed
+			FROM workflow_runs
+			GROUP BY workflow_id
+		) s ON w.id = s.workflow_id
+		WHERE w.id = $1`, id).
+		Scan(&w.ID, &w.TenantID, &w.Name, &w.Description, &w.Status,
+			&w.Trigger, &nodesRaw, &edgesRaw, &statsRaw,
+			&w.CreatedAt, &w.UpdatedAt, &w.LastRunAt,
+			&total, &success, &failed, &avgMs,
+			&dayRuns, &daySuccess, &dayFailed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow %q not found", id)
 	}
-	return w, err
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal(nodesRaw, &w.Nodes) //nolint:errcheck
+	json.Unmarshal(edgesRaw, &w.Edges) //nolint:errcheck
+	json.Unmarshal(statsRaw, &w.Stats) //nolint:errcheck
+	if w.Nodes == nil { w.Nodes = []domain.WorkflowNode{} }
+	if w.Edges == nil { w.Edges = []domain.WorkflowEdge{} }
+	w.Stats.TotalRuns = total
+	w.Stats.SuccessRuns = success
+	w.Stats.FailedRuns = failed
+	w.Stats.AvgDurationMs = avgMs
+	w.Stats.LastDayRuns = dayRuns
+	w.Stats.LastDaySuccess = daySuccess
+	w.Stats.LastDayFailed = dayFailed
+	return &w, nil
 }
 
 func (r *WorkflowRepo) Create(ctx context.Context, w *domain.Workflow) error {

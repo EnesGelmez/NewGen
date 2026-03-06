@@ -66,7 +66,7 @@ export default function TenantAgentPage() {
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3"> 
         <button
           onClick={() => navigate("/admin/tenants")}
           className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/60 transition-colors"
@@ -101,7 +101,7 @@ export default function TenantAgentPage() {
           {" "}<code className="bg-violet-100 px-1 rounded font-mono">Endpoint Yolu</code>'nu ekleyerek POST atar
           (ör. <code className="bg-violet-100 px-1 rounded font-mono">http://localhost:9090/api</code>{" "}
           + <code className="bg-violet-100 px-1 rounded font-mono">/LogoHR/UpdateApprovalStatus</code>).
-          İstekler <code className="bg-violet-100 px-1 rounded font-mono">X-Agent-Secret</code> başlığı ile imzalanır.
+          İstekler <code className="bg-violet-100 px-1 rounded font-mono">X-API-Key</code> başlığı ile imzalanır.
         </p>
       </div>
 
@@ -137,7 +137,7 @@ export default function TenantAgentPage() {
         {/* Secret Key */}
         <div>
           <label className="text-xs font-medium text-muted-foreground block mb-1">
-            Secret Key <span className="text-muted-foreground font-normal">(X-Agent-Secret header)</span>
+            Secret Key <span className="text-muted-foreground font-normal">(X-API-Key header)</span>
           </label>
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -195,7 +195,7 @@ export default function TenantAgentPage() {
             <p className="text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">İstek Önizlemesi</p>
             <pre className="text-[10.5px] font-mono text-slate-700 leading-relaxed whitespace-pre-wrap break-all">
 {`POST ${form.endpointUrl}
-X-Agent-Secret: ${form.secretKey ? form.secretKey.slice(0, 12) + "…" : "<auto>"}
+X-API-Key: ${form.secretKey ? form.secretKey.slice(0, 12) + "…" : "<auto>"}
 Content-Type: application/json
 
 {
@@ -254,8 +254,8 @@ Content-Type: application/json
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p className="font-semibold mb-1">LOGO ERP Entegrasyonu</p>
         <p className="text-[12px] leading-relaxed">
-          LOGO ERP tarafında secret key doğrulaması için gelen isteğin
-          <code className="bg-amber-100 px-1 rounded font-mono mx-1">X-Agent-Secret</code>
+          LOGO ERP tarafında API key doğrulaması için gelen isteğin
+          <code className="bg-amber-100 px-1 rounded font-mono mx-1">X-API-Key</code>
           başlığını kontrol edin. Örnek endpoint:
           <code className="bg-amber-100 px-1 rounded font-mono ml-1">http://localhost:5000/api/LogoHR/UpdateApprovalStatus</code>
         </p>
