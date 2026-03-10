@@ -46,6 +46,7 @@ export default function NewTenantPage() {
   const [form, setForm] = useState({
     // Step 1
     companyName: "",
+    shortName: "",
     taxNumber: "",
     address: "",
     city: "",
@@ -58,9 +59,10 @@ export default function NewTenantPage() {
     logoErpUser: "",
     logoErpPass: "",
     // Step 3
-    adminName: "",
+    adminName: "Admin",
     adminEmail: "",
-    adminPhone: "",
+    adminPassword: "",
+    adminPasswordConfirm: "",
     plan: "Business",
   });
 
@@ -70,11 +72,6 @@ export default function NewTenantPage() {
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setSubmitError("");
-    // Generate a temp password: 8 random chars + fixed suffix for complexity
-    const pool = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-    const tempPass =
-      Array.from({ length: 8 }, () => pool[Math.floor(Math.random() * pool.length)]).join("") +
-      "!1";
     try {
       // 1. Create tenant
       const tRes = await fetch(`${API}/api/v1/tenants`, {
@@ -82,7 +79,7 @@ export default function NewTenantPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           name: form.companyName,
-          subdomain: toSubdomain(form.companyName),
+          subdomain: toSubdomain(form.shortName || form.companyName),
           email: form.adminEmail,
           plan: form.plan,
         }),
@@ -97,10 +94,10 @@ export default function NewTenantPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          name: form.adminName,
+          name: "Admin",
           email: form.adminEmail,
           role: "TENANT_ADMIN",
-          password: tempPass,
+          password: form.adminPassword,
           tenantId: tData.id,
         }),
       });
@@ -113,7 +110,7 @@ export default function NewTenantPage() {
         tenantId: tData.id,
         apiKey: tData.apiKey,
         email: form.adminEmail,
-        tempPassword: tempPass,
+        tempPassword: form.adminPassword,
       });
       setSubmitted(true);
     } catch {
@@ -166,7 +163,7 @@ export default function NewTenantPage() {
             <Button variant="outline" className="flex-1" onClick={() => navigate("/admin/tenants")}>
               Listeyine Dön
             </Button>
-            <Button className="flex-1" onClick={() => { setSubmitted(false); setStep(1); setForm({ companyName: "", taxNumber: "", address: "", city: "", phone: "", logoErpDb: "", logoErpVersion: "2024.2", logoErpServer: "", logoErpPort: "1433", logoErpUser: "", logoErpPass: "", adminName: "", adminEmail: "", adminPhone: "", plan: "Business" }); }}>
+            <Button className="flex-1" onClick={() => { setSubmitted(false); setStep(1); setForm({ companyName: "", shortName: "", taxNumber: "", address: "", city: "", phone: "", logoErpDb: "", logoErpVersion: "2024.2", logoErpServer: "", logoErpPort: "1433", logoErpUser: "", logoErpPass: "", adminName: "Admin", adminEmail: "", adminPassword: "", adminPasswordConfirm: "", plan: "Business" }); }}>
               Yeni Tenant Ekle
             </Button>
           </div>
@@ -224,10 +221,29 @@ export default function NewTenantPage() {
               <div className="col-span-2">
                 <Input
                   label="Şirket Unvanı *"
-                  placeholder="Örn: Arçelik A.Ş."
+                  placeholder="Örn: KurumSoft Kurumsal Bilişim Tekn.ve Dan.Hizm.A.Ş."
                   value={form.companyName}
                   onChange={set("companyName")}
                 />
+              </div>
+              <div className="col-span-2">
+                <Input
+                  label="Kısa Ad / Domain *"
+                  placeholder="kurumsoft"
+                  value={form.shortName}
+                  onChange={(e) => {
+                    const val = toSubdomain(e.target.value);
+                    setForm((prev) => ({ ...prev, shortName: val }));
+                  }}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Subdomain ve admin e-postasmda kullanılır.
+                  {form.shortName && (
+                    <span className="ml-1 font-mono text-primary">
+                      admin@{form.shortName}.com
+                    </span>
+                  )}
+                </p>
               </div>
               <Input
                 label="Vergi Kimlik No (VKN) *"
@@ -270,7 +286,7 @@ export default function NewTenantPage() {
               </div>
             </div>
             <div className="flex justify-end pt-2">
-              <Button onClick={() => setStep(2)} disabled={!form.companyName || !form.taxNumber}>
+              <Button onClick={() => setStep(2)} disabled={!form.companyName || !form.shortName}>
                 Devam Et <ChevronRight size={15} />
               </Button>
             </div>
@@ -338,7 +354,17 @@ export default function NewTenantPage() {
             </div>
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep(1)}>Geri</Button>
-              <Button onClick={() => setStep(3)} disabled={!form.logoErpDb || !form.logoErpServer}>
+              <Button
+                onClick={() => {
+                  // Auto-fill admin email from shortName if not yet set
+                  setForm((prev) => ({
+                    ...prev,
+                    adminEmail: prev.adminEmail || `admin@${prev.shortName || toSubdomain(prev.companyName)}.com`,
+                  }));
+                  setStep(3);
+                }}
+                disabled={!form.logoErpDb || !form.logoErpServer}
+              >
                 Devam Et <ChevronRight size={15} />
               </Button>
             </div>
@@ -351,40 +377,57 @@ export default function NewTenantPage() {
         <Card>
           <CardHeader>
             <CardTitle>Admin Kullanıcı Bilgileri</CardTitle>
-            <CardDescription>Bu bilgilerle sistem otomatik olarak bir Tenant Admin hesabı oluşturacaktır</CardDescription>
+            <CardDescription>Tenant admin hesabı bu bilgilerle oluşturulacaktır. İlk girişte şifre değiştirilmesi zorunlu olacaktır.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <Input
-                  label="Ad Soyad *"
-                  placeholder="Mehmet Yılmaz"
-                  value={form.adminName}
-                  onChange={set("adminName")}
-                />
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Ad Soyad</label>
+                <div className="h-9 rounded-lg border border-input bg-muted px-3 flex items-center text-sm text-muted-foreground">
+                  Admin
+                </div>
               </div>
               <Input
                 label="E-posta Adresi *"
                 type="email"
-                placeholder="admin@sirket.com"
+                placeholder={`admin@${form.shortName || toSubdomain(form.companyName) || "sirket"}.com`}
                 value={form.adminEmail}
                 onChange={set("adminEmail")}
               />
               <Input
-                label="Telefon"
-                placeholder="+90 532 555 0000"
-                value={form.adminPhone}
-                onChange={set("adminPhone")}
+                label="Şifre *"
+                type="password"
+                placeholder="En az 8 karakter"
+                value={form.adminPassword}
+                onChange={set("adminPassword")}
               />
+              <Input
+                label="Şifre Tekrar *"
+                type="password"
+                placeholder="Şifreyi tekrar girin"
+                value={form.adminPasswordConfirm}
+                onChange={set("adminPasswordConfirm")}
+              />
+              {form.adminPasswordConfirm && form.adminPassword !== form.adminPasswordConfirm && (
+                <p className="text-xs text-red-600">Şifreler eşleşmiyor.</p>
+              )}
             </div>
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <p className="text-xs text-blue-700">
-                <strong>Otomatik İşlem:</strong> Kullanıcı oluşturulunca sistem geçici bir şifre üretecek ve e-posta ile iletecektir.
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs text-amber-700">
+                <strong>Not:</strong> Kullanıcı ilk girişinde bu şifreyi değiştirmek zorunda kalacaktır.
               </p>
             </div>
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep(2)}>Geri</Button>
-              <Button onClick={() => setStep(4)} disabled={!form.adminName || !form.adminEmail}>
+              <Button
+                onClick={() => setStep(4)}
+                disabled={
+                  !form.adminEmail ||
+                  !form.adminPassword ||
+                  form.adminPassword.length < 8 ||
+                  form.adminPassword !== form.adminPasswordConfirm
+                }
+              >
                 Önizleme <ChevronRight size={15} />
               </Button>
             </div>
@@ -421,8 +464,9 @@ export default function NewTenantPage() {
               {
                 title: "Admin Kullanıcı",
                 items: [
-                  { label: "Ad Soyad", value: form.adminName },
+                  { label: "Ad Soyad", value: "Admin" },
                   { label: "E-posta", value: form.adminEmail },
+                  { label: "Şifre", value: "•".repeat(form.adminPassword.length) },
                 ],
               },
             ].map((section) => (

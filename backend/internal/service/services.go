@@ -613,22 +613,127 @@ func getValueByPath(data map[string]interface{}, path string) (interface{}, bool
 	return nil, false
 }
 
-// applyModelMappings builds a new payload using the model_mapping node's
-// "mappings" config: { "targetPath": "sourcePath", ... }.
-// Fields with no mapping entry are dropped (strict mode).
+// remapArrayItems rebuilds each object in srcSlice by renaming fields per fieldMap
+// (targetField → sourceField). Fields not listed in the map pass through unchanged.
+func remapArrayItems(srcSlice []interface{}, fieldMap map[string]string) []interface{} {
+	srcUsed := make(map[string]bool, len(fieldMap))
+	for _, sf := range fieldMap {
+		srcUsed[sf] = true
+	}
+	out := make([]interface{}, len(srcSlice))
+	for i, item := range srcSlice {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			out[i] = item
+			continue
+		}
+		newItem := make(map[string]interface{}, len(itemMap))
+		for tf, sf := range fieldMap {
+			if v, exists := itemMap[sf]; exists {
+				newItem[tf] = v
+			}
+		}
+		// Pass unmapped source fields through unchanged.
+		for k, v := range itemMap {
+			if !srcUsed[k] {
+				if _, exists := newItem[k]; !exists {
+					newItem[k] = v
+				}
+			}
+		}
+		out[i] = newItem
+	}
+	return out
+}
+
+// applyModelMappings builds the agent payload from the model_mapping node config.
+// Config shape: { "targetPath": "sourcePath", ... }
+//
+// Supports three mapping types:
+//   - Scalar/object:    "bankName"          → "bankaAdi"
+//   - Whole array:      "transactions"      → "islemler[]"
+//   - Array-item field: "transactions[].desc" → "islemler[].aciklama"
+//
+// When array-item field mappings exist, each item's fields are renamed accordingly;
+// unmapped source fields pass through unchanged.
 func applyModelMappings(mappings map[string]interface{}, payload map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{}, len(mappings))
+	result := make(map[string]interface{})
+
+	// First pass — collect array-item field rename rules.
+	// "transactions[].desc" → "islemler[].aciklama" becomes:
+	//   arrayFields["transactions"]["desc"] = "aciklama"
+	//   arraySrc["transactions"]            = "islemler"
+	arrayFields := make(map[string]map[string]string)
+	arraySrc := make(map[string]string)
+
 	for target, src := range mappings {
 		srcPath, _ := src.(string)
 		if srcPath == "" {
 			continue
 		}
-		if val, ok := getValueByPath(payload, srcPath); ok {
-			// Use the bare field name (strip [] suffix) as the key
-			targetKey := strings.TrimSuffix(target, "[]")
-			result[targetKey] = val
+		tIdx := strings.Index(target, "[].")
+		if tIdx == -1 {
+			continue
+		}
+		targetArr := target[:tIdx]
+		targetField := target[tIdx+3:]
+		var srcArr, srcField string
+		if sIdx := strings.Index(srcPath, "[]."); sIdx != -1 {
+			srcArr = srcPath[:sIdx]
+			srcField = srcPath[sIdx+3:]
+		} else {
+			srcArr = strings.TrimSuffix(srcPath, "[]")
+			srcField = targetField
+		}
+		if _, ok := arrayFields[targetArr]; !ok {
+			arrayFields[targetArr] = make(map[string]string)
+		}
+		arrayFields[targetArr][targetField] = srcField
+		if _, ok := arraySrc[targetArr]; !ok {
+			arraySrc[targetArr] = srcArr
 		}
 	}
+
+	// Second pass — process top-level and direct array mappings.
+	processedArrays := make(map[string]bool)
+	for target, src := range mappings {
+		srcPath, _ := src.(string)
+		if srcPath == "" || strings.Contains(target, "[].") {
+			continue
+		}
+		targetKey := strings.TrimSuffix(target, "[]")
+		cleanSrc := strings.TrimSuffix(srcPath, "[]")
+
+		srcVal, ok := getValueByPath(payload, cleanSrc)
+		if !ok {
+			continue
+		}
+		if fieldMap, hasItemMappings := arrayFields[targetKey]; hasItemMappings {
+			if srcSlice, isSlice := srcVal.([]interface{}); isSlice {
+				result[targetKey] = remapArrayItems(srcSlice, fieldMap)
+				processedArrays[targetKey] = true
+				continue
+			}
+		}
+		result[targetKey] = srcVal
+	}
+
+	// Third pass — arrays with only item-level mappings (no explicit array-level entry).
+	for targetArr, srcArrName := range arraySrc {
+		if processedArrays[targetArr] {
+			continue
+		}
+		srcVal, ok := getValueByPath(payload, srcArrName)
+		if !ok {
+			continue
+		}
+		if srcSlice, isSlice := srcVal.([]interface{}); isSlice {
+			result[targetArr] = remapArrayItems(srcSlice, arrayFields[targetArr])
+		} else {
+			result[targetArr] = srcVal
+		}
+	}
+
 	return result
 }
 
@@ -639,6 +744,13 @@ func applyModelMappings(mappings map[string]interface{}, payload map[string]inte
 func callAgent(ctx context.Context, method, endpoint, secret string, agentModel map[string]interface{}) map[string]interface{} {
 	if endpoint == "" {
 		return map[string]interface{}{"_agentError": "no endpoint configured"}
+	}
+	// Ensure the URL has a scheme; reject bare paths like "/api/Test/Real".
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		return map[string]interface{}{
+			"_agentError":    "geçersiz endpoint: scheme (http:// veya https://) eksik — tenant agent ayarlarında tam URL girilmeli",
+			"_agentEndpoint": endpoint,
+		}
 	}
 	if method == "" {
 		method = http.MethodPost
@@ -821,9 +933,14 @@ func (s *WorkflowService) Trigger(
 			hasAgentRequest = true
 			// Combine tenant base URL + node path.
 			if path, ok := node.Config["agentEndpoint"].(string); ok && path != "" {
-				base := strings.TrimRight(agentEndpoint, "/")
-				p := "/" + strings.TrimLeft(path, "/")
-				agentEndpoint = base + p
+				// If the node value is already a full URL (has a scheme), use it directly.
+				if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+					agentEndpoint = path
+				} else {
+					base := strings.TrimRight(agentEndpoint, "/")
+					p := "/" + strings.TrimLeft(path, "/")
+					agentEndpoint = base + p
+				}
 			}
 			// HTTP method from node config (default POST).
 			if m, ok := node.Config["httpMethod"].(string); ok && m != "" {

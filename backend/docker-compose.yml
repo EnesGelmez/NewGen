@@ -1,16 +1,18 @@
-﻿# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Nexus Platform â€“ local development infrastructure
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿# -----------------------------------------------------------------------------
+# NexusIO Platform - local development infrastructure
+# -----------------------------------------------------------------------------
 # Start:  docker compose up -d
 # Stop:   docker compose down
 # Reset:  docker compose down -v   (drops all volumes / data)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -----------------------------------------------------------------------------
+
+name: nexusio
 
 services:
-  # â”€â”€ PostgreSQL 16 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # -- PostgreSQL 16 -----------------------------------------------------------
   postgres:
     image: postgres:16-alpine
-    container_name: nexus_postgres
+    container_name: nexusio_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-nexus}
@@ -27,34 +29,48 @@ services:
       timeout: 5s
       retries: 10
 
-  # â”€â”€ Go Backend API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  backend:
+  # -- Go Backend API ----------------------------------------------------------
+  nexusio:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nexus_backend
+    container_name: nexusio_backend
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"
     environment:
-      PORT:         ${PORT:-8080}
-      DATABASE_URL: postgres://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus_secret}@postgres:5432/${POSTGRES_DB:-nexus}?sslmode=disable
-      JWT_SECRET:   ${JWT_SECRET:-change-me-in-production-super-secret-key}
-      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-24}
-      CORS_ORIGIN:  ${CORS_ORIGIN:-http://localhost:5173}
-      API_KEY_ARCELIK: ${API_KEY_ARCELIK:-test-api-key-arcelik-001}
-      API_KEY_BEKO:    ${API_KEY_BEKO:-test-api-key-beko-002}
-      ENCRYPTION_KEY:  ${ENCRYPTION_KEY:-}
+      PORT:           ${PORT:-8080}
+      DATABASE_URL:   postgres://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus_secret}@postgres:5432/${POSTGRES_DB:-nexus}?sslmode=disable
+      JWT_SECRET:     ${JWT_SECRET:-change-me-in-production-super-secret-key}
+      JWT_TTL_HOURS:  ${JWT_TTL_HOURS:-24}
+      CORS_ORIGIN:    ${CORS_ORIGIN:-http://localhost:3000}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
 
-  # â”€â”€ pgAdmin 4 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # -- React Frontend (nginx + proxy) ------------------------------------------
+  frontend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        # Empty = browser uses same origin; nginx proxies /api/ to nexusio internally.
+        # Set VITE_API_URL=https://api.example.com for external deployments.
+        VITE_API_URL: ${VITE_API_URL:-}
+    container_name: nexusio_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - nexusio
+
+  # -- pgAdmin 4 ---------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: nexus_pgadmin
+    container_name: nexusio_pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL:    ${PGADMIN_EMAIL:-admin@nexus.dev}
@@ -70,4 +86,3 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
-

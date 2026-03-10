@@ -42,7 +42,7 @@ mux.HandleFunc("POST /api/v1/auth/change-password",
 mux.HandleFunc("GET /api/v1/users",
 	chain(userH.List, middleware.Auth(jwtSvc)))
 mux.HandleFunc("POST /api/v1/users",
-	chain(userH.Create, middleware.Auth(jwtSvc), middleware.RequireRole("TENANT_ADMIN")))
+	chain(userH.Create, middleware.Auth(jwtSvc), middleware.RequireRole("TENANT_ADMIN", "SUPER_ADMIN")))
 mux.HandleFunc("PUT /api/v1/users/{id}",
 	chain(userH.Update, middleware.Auth(jwtSvc), middleware.RequireRole("TENANT_ADMIN")))
 mux.HandleFunc("DELETE /api/v1/users/{id}",

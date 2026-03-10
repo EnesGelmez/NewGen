@@ -13,6 +13,7 @@ import {
   AlertCircle,
   X,
   Save,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../../components/ui/Card";
 import { Badge } from "../../components/ui/Badge";
@@ -35,6 +36,8 @@ export default function TenantListPage() {
   const [editingTenant, setEditingTenant] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  const [deletingTenant, setDeletingTenant] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setLoadingTenants(true);
@@ -101,6 +104,24 @@ export default function TenantListPage() {
       alert("Kayıt başarısız: " + e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingTenant) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`${API}/api/v1/tenants/${deletingTenant.id}`, {
+        method: "DELETE",
+        headers: authHeader(),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setTenants((prev) => prev.filter((t) => t.id !== deletingTenant.id));
+      setDeletingTenant(null);
+    } catch (e) {
+      alert("Silme başarısız: " + e.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -310,6 +331,13 @@ export default function TenantListPage() {
                       >
                         <Edit2 size={14} />
                       </button>
+                      <button
+                        onClick={() => setDeletingTenant(tenant)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
+                        title="Sil"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -395,6 +423,47 @@ export default function TenantListPage() {
               >
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                 Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirmation Modal ── */}
+      {deletingTenant && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-border overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="text-sm font-semibold text-foreground">Tenant'ı Sil</h2>
+              <button onClick={() => setDeletingTenant(null)} className="p-1.5 rounded-lg hover:bg-muted">
+                <X size={15} className="text-muted-foreground" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-50 mx-auto">
+                <Trash2 size={20} className="text-red-600" />
+              </div>
+              <p className="text-sm text-center text-foreground">
+                <strong>{deletingTenant.name}</strong> tenant'ını silmek istediğinizden emin misiniz?
+              </p>
+              <p className="text-xs text-center text-muted-foreground">
+                Bu işlem geri alınamaz. Tenant'a ait tüm kullanıcılar ve veriler kalıcı olarak silinir.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <button
+                onClick={() => setDeletingTenant(null)}
+                className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                Evet, Sil
               </button>
             </div>
           </div>
